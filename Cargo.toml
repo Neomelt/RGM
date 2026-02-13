@@ -24,3 +24,20 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.143"
 thiserror = "2.0.16"
 crossbeam-channel = "0.5"
+
+[package.metadata.deb]
+maintainer = "Xlqmu <xlqmu@github.com>"
+copyright = "2026, Xlqmu"
+extended-description = "A lightweight GPU monitoring utility with egui UI for NVIDIA and AMD GPUs on Linux"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/rgm", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/rgm/", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/rgm", dest = "/usr/bin/rgm", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/rgm/README.md", mode = "644" },
+]
