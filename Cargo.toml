@@ -6,7 +6,7 @@ description = "A Rust GPU Monitor with egui UI for NVIDIA and AMD GPUs on Linux"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Xlqmu/RGM"
 readme = "README.md"
-keywords = ["nvidia", "amd", "gpu", "monitor", "linux", "egui"]
+keywords = ["nvidia", "amd", "gpu", "monitor", "egui"]
 categories = ["gui", "hardware-support", "visualization"]
 
 [[bin]]
