@@ -23,18 +23,40 @@ Before you begin, ensure you have the following installed on your system:
 
 ## Installation
 
+### Method 1: Download Binary (Recommended)
+
+Download the latest release for your Linux distribution from the [Releases Page](https://github.com/Xlqmu/RGM/releases).
+
+*   **Debian/Ubuntu:** Download the `.deb` file and install:
+    ```bash
+    sudo dpkg -i rgm_*.deb
+    ```
+*   **Fedora/RHEL/openSUSE:** Download the `.rpm` file and install:
+    ```bash
+    sudo rpm -i rgm-*.rpm
+    ```
+*   **Other Linux:** Download the `.tar.gz`, extract it, and run the binary directly.
+
+### Method 2: Install from Crates.io
+
+If you have Rust installed, you can install RGM directly from crates.io:
+
+```bash
+cargo install rgm_ui
+```
+
+### Method 3: Build from Source
+
 1.  **Clone the repository:**
     ```bash
     git clone https://github.com/Xlqmu/RGM.git
     cd RGM
     ```
 
-2.  **Build the optimized binary:**
+2.  **Build and install:**
     ```bash
-    cargo build --release
+    cargo install --path .
     ```
-
-The final executable will be located at `target/release/rgm`.
 
 ## Usage
 
