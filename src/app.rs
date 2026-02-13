@@ -64,7 +64,7 @@ impl eframe::App for RgmApp {
             data.push_back(gpu_data);
             while data
                 .front()
-                .map_or(false, |d| d.timestamp < window_start_time)
+                .is_some_and(|d| d.timestamp < window_start_time)
             {
                 data.pop_front();
             }
