@@ -34,10 +34,16 @@ priority = "optional"
 assets = [
     ["target/release/rgm", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/rgm/", "644"],
+    ["assets/linux/rgm.desktop", "usr/share/applications/rgm.desktop", "644"],
+    ["assets/icons/rgm.png", "usr/share/icons/hicolor/256x256/apps/rgm.png", "644"],
+    ["assets/icons/rgm.svg", "usr/share/icons/hicolor/scalable/apps/rgm.svg", "644"],
 ]
 
 [package.metadata.generate-rpm]
 assets = [
     { source = "target/release/rgm", dest = "/usr/bin/rgm", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/rgm/README.md", mode = "644" },
+    { source = "assets/linux/rgm.desktop", dest = "/usr/share/applications/rgm.desktop", mode = "644" },
+    { source = "assets/icons/rgm.png", dest = "/usr/share/icons/hicolor/256x256/apps/rgm.png", mode = "644" },
+    { source = "assets/icons/rgm.svg", dest = "/usr/share/icons/hicolor/scalable/apps/rgm.svg", mode = "644" },
 ]

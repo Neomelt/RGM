@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RGM
+Comment=Rust GPU Monitor
+Exec=rgm
+Icon=rgm
+Terminal=false
+Categories=System;Utility;Monitor;
+Keywords=GPU;monitor;NVIDIA;AMD;egui;
+StartupNotify=true

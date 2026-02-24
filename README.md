@@ -11,6 +11,7 @@ A lightweight GPU monitoring utility built with Rust and egui. Supports **NVIDIA
 *   **iGPU Friendly:** Works with AMD integrated GPUs – unavailable sensors gracefully fall back to zero.
 *   **Real-time Plots:** GPU utilization, memory, temperature, and power visualised over time.
 *   **Low Overhead:** Built in Rust for maximum performance and minimal resource consumption.
+*   **Desktop Integration:** `.deb`/`.rpm` packages install an application entry in app launchers (Show Apps).
 
 ## Prerequisites
 
