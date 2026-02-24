@@ -31,6 +31,7 @@ copyright = "2026, Xlqmu"
 extended-description = "A lightweight GPU monitoring utility with egui UI for NVIDIA and AMD GPUs on Linux"
 section = "utils"
 priority = "optional"
+maintainer-scripts = "packaging/debian"
 assets = [
     ["target/release/rgm", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/rgm/", "644"],
@@ -47,3 +48,5 @@ assets = [
     { source = "assets/icons/rgm.png", dest = "/usr/share/icons/hicolor/256x256/apps/rgm.png", mode = "644" },
     { source = "assets/icons/rgm.svg", dest = "/usr/share/icons/hicolor/scalable/apps/rgm.svg", mode = "644" },
 ]
+post_install_script = "packaging/rpm/post_install.sh"
+post_uninstall_script = "packaging/rpm/post_uninstall.sh"
