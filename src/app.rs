@@ -1,6 +1,6 @@
 use crate::data::{GpuData, GpuInfo, ProcessInfo};
 use crate::monitor::create_monitor;
-use crossbeam_channel::{Receiver, bounded};
+use crossbeam_channel::{bounded, Receiver};
 use eframe::egui::{self, Color32};
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use std::collections::VecDeque;
@@ -25,20 +25,18 @@ impl RgmApp {
         let monitor = create_monitor().expect("Failed to find and initialize a GPU monitor!");
         let gpu_info = monitor.get_static_info();
 
-        thread::spawn(move || {
-            loop {
-                match monitor.sample() {
-                    Ok((gpu_data, proc_infos)) => {
-                        if sender.send((gpu_data, proc_infos)).is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error sampling GPU data: {}", e);
+        thread::spawn(move || loop {
+            match monitor.sample() {
+                Ok((gpu_data, proc_infos)) => {
+                    if sender.send((gpu_data, proc_infos)).is_err() {
+                        break;
                     }
                 }
-                thread::sleep(Duration::from_millis(100));
+                Err(e) => {
+                    eprintln!("Error sampling GPU data: {}", e);
+                }
             }
+            thread::sleep(Duration::from_millis(100));
         });
 
         let mut style = (*cc.egui_ctx.style()).clone();
@@ -141,8 +139,13 @@ impl eframe::App for RgmApp {
             };
             let gpu_util_points: PlotPoints =
                 to_relative_points(Box::new(|d| d.utilization as f64));
-            let memory_points: PlotPoints =
-                to_relative_points(Box::new(|d| d.memory_used / d.memory_total * 100.0));
+            let memory_points: PlotPoints = to_relative_points(Box::new(|d| {
+                if d.memory_total > f64::EPSILON {
+                    d.memory_used / d.memory_total * 100.0
+                } else {
+                    0.0
+                }
+            }));
             let temp_points: PlotPoints = to_relative_points(Box::new(|d| d.temperature as f64));
             let power_points: PlotPoints = data_guard
                 .iter()
