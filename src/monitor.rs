@@ -1,7 +1,7 @@
 use crate::data::{GpuData, GpuInfo, ProcessInfo};
-use nvml_wrapper::Nvml;
 use nvml_wrapper::enum_wrappers::device::{Clock, PcieUtilCounter, TemperatureSensor};
 use nvml_wrapper::enums::device::UsedGpuMemory;
+use nvml_wrapper::Nvml;
 use thiserror::Error;
 
 use amdgpu_sysfs::gpu_handle::GpuHandle;
@@ -45,16 +45,26 @@ impl NvmlMonitor {
 
 impl GpuMonitor for NvmlMonitor {
     fn get_static_info(&self) -> GpuInfo {
-        // Temporarily get the device object when needed
-        let device = self.nvml.device_by_index(self.device_index).unwrap();
+        let driver_version = self
+            .nvml
+            .sys_driver_version()
+            .unwrap_or_else(|_| "N/A".to_string());
+
+        let Ok(device) = self.nvml.device_by_index(self.device_index) else {
+            return GpuInfo {
+                name: "N/A".to_string(),
+                uuid: "N/A".to_string(),
+                driver_version,
+                vbios_version: "N/A".to_string(),
+                pcie_gen: 0,
+                pcie_width: 0,
+            };
+        };
 
         GpuInfo {
             name: device.name().unwrap_or_else(|_| "N/A".to_string()),
             uuid: device.uuid().unwrap_or_else(|_| "N/A".to_string()),
-            driver_version: self
-                .nvml
-                .sys_driver_version()
-                .unwrap_or_else(|_| "N/A".to_string()),
+            driver_version,
             vbios_version: device.vbios_version().unwrap_or_else(|_| "N/A".to_string()),
             pcie_gen: device.current_pcie_link_gen().unwrap_or(0),
             pcie_width: device.current_pcie_link_width().unwrap_or(0),
@@ -86,7 +96,7 @@ impl GpuMonitor for NvmlMonitor {
             device.pcie_throughput(PcieUtilCounter::Send),
             device.pcie_throughput(PcieUtilCounter::Receive),
         ) {
-            (Ok(rx), Ok(tx)) => (tx as f64 / 1024.0, rx as f64 / 1024.0),
+            (Ok(tx), Ok(rx)) => (tx as f64 / 1024.0, rx as f64 / 1024.0),
             _ => (0.0, 0.0),
         };
 
@@ -202,6 +212,27 @@ impl AmdgpuMonitor {
         }
         0
     }
+
+    /// Parse strings like "8.0 GT/s PCIe" to PCIe generation.
+    fn parse_pcie_gen(speed: &str) -> Option<u32> {
+        let rate = speed
+            .split_whitespace()
+            .find_map(|part| part.parse::<f32>().ok())?;
+
+        if rate >= 31.5 {
+            Some(5)
+        } else if rate >= 15.5 {
+            Some(4)
+        } else if rate >= 7.5 {
+            Some(3)
+        } else if rate >= 4.5 {
+            Some(2)
+        } else if rate >= 2.4 {
+            Some(1)
+        } else {
+            None
+        }
+    }
 }
 
 impl GpuMonitor for AmdgpuMonitor {
@@ -227,27 +258,12 @@ impl GpuMonitor for AmdgpuMonitor {
             .and_then(|s| s.trim().parse::<u32>().ok())
             .unwrap_or(0);
 
-        // PCIe speed string like "8.0 GT/s PCIe" – extract gen number heuristically
+        // PCIe speed string like "8.0 GT/s PCIe"
         let pcie_gen = self
             .gpu_handle
             .get_current_link_speed()
             .ok()
-            .and_then(|s| {
-                let s = s.trim().to_string();
-                if s.contains("32") || s.contains("5.0") {
-                    Some(5)
-                } else if s.contains("16") || s.contains("4.0") {
-                    Some(4)
-                } else if s.contains("8.0") {
-                    Some(3)
-                } else if s.contains("5.0") {
-                    Some(2)
-                } else if s.contains("2.5") {
-                    Some(1)
-                } else {
-                    None
-                }
-            })
+            .and_then(|s| Self::parse_pcie_gen(&s))
             .unwrap_or(0);
 
         GpuInfo {
@@ -264,10 +280,10 @@ impl GpuMonitor for AmdgpuMonitor {
         let utilization = self.gpu_handle.get_busy_percent().unwrap_or(0) as f32;
 
         // VRAM – may be unavailable on iGPUs
-        let memory_used = self.gpu_handle.get_used_vram().unwrap_or(0) as f64
-            / 1024.0 / 1024.0 / 1024.0;
-        let memory_total = self.gpu_handle.get_total_vram().unwrap_or(0) as f64
-            / 1024.0 / 1024.0 / 1024.0;
+        let memory_used =
+            self.gpu_handle.get_used_vram().unwrap_or(0) as f64 / 1024.0 / 1024.0 / 1024.0;
+        let memory_total =
+            self.gpu_handle.get_total_vram().unwrap_or(0) as f64 / 1024.0 / 1024.0 / 1024.0;
 
         let temperature = self.read_temperature();
 
@@ -282,9 +298,9 @@ impl GpuMonitor for AmdgpuMonitor {
         };
 
         // Power from hwmon
-        let (power_usage, power_limit) = if let Some(hw_mon) = self.gpu_handle.hw_monitors.first()
-        {
-            let usage = hw_mon.get_power_average()
+        let (power_usage, power_limit) = if let Some(hw_mon) = self.gpu_handle.hw_monitors.first() {
+            let usage = hw_mon
+                .get_power_average()
                 .or_else(|_| hw_mon.get_power_input())
                 .unwrap_or(0.0);
             let cap = hw_mon.get_power_cap().unwrap_or(0.0);
