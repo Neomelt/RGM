@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RGM icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1023"/>
+      <stop offset="100%" stop-color="#16335f"/>
+    </linearGradient>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1de5b6"/>
+      <stop offset="100%" stop-color="#17a9ff"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#152243"/>
+      <stop offset="100%" stop-color="#0b1329"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+
+  <g opacity="0.22" fill="#8ad4ff">
+    <rect x="72" y="102" width="4" height="28"/>
+    <rect x="72" y="150" width="4" height="28"/>
+    <rect x="72" y="198" width="4" height="28"/>
+    <rect x="72" y="246" width="4" height="28"/>
+    <rect x="72" y="294" width="4" height="28"/>
+    <rect x="72" y="342" width="4" height="28"/>
+    <rect x="436" y="102" width="4" height="28"/>
+    <rect x="436" y="150" width="4" height="28"/>
+    <rect x="436" y="198" width="4" height="28"/>
+    <rect x="436" y="246" width="4" height="28"/>
+    <rect x="436" y="294" width="4" height="28"/>
+    <rect x="436" y="342" width="4" height="28"/>
+    <rect x="102" y="72" width="28" height="4"/>
+    <rect x="150" y="72" width="28" height="4"/>
+    <rect x="198" y="72" width="28" height="4"/>
+    <rect x="246" y="72" width="28" height="4"/>
+    <rect x="294" y="72" width="28" height="4"/>
+    <rect x="342" y="72" width="28" height="4"/>
+    <rect x="102" y="436" width="28" height="4"/>
+    <rect x="150" y="436" width="28" height="4"/>
+    <rect x="198" y="436" width="28" height="4"/>
+    <rect x="246" y="436" width="28" height="4"/>
+    <rect x="294" y="436" width="28" height="4"/>
+    <rect x="342" y="436" width="28" height="4"/>
+  </g>
+
+  <rect x="96" y="96" width="320" height="320" rx="72" fill="url(#chip)"/>
+  <rect x="124" y="124" width="264" height="264" rx="50" fill="url(#screen)"/>
+
+  <path d="M168 305 L215 258 L253 287 L307 224 L345 252" fill="none" stroke="#27ffd0" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="168" cy="305" r="11" fill="#27ffd0"/>
+  <circle cx="345" cy="252" r="11" fill="#27ffd0"/>
+
+  <circle cx="206" cy="204" r="10" fill="#7fe4ff"/>
+  <circle cx="304" cy="204" r="10" fill="#7fe4ff"/>
+  <path d="M210 245 Q256 278 302 245" fill="none" stroke="#7fe4ff" stroke-width="10" stroke-linecap="round"/>
+</svg>

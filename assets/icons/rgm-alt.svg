@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="RGM alternate icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10131f"/>
+      <stop offset="100%" stop-color="#2a1c4a"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4df7ff"/>
+      <stop offset="100%" stop-color="#ff4ddd"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+
+  <circle cx="256" cy="256" r="156" fill="none" stroke="url(#ring)" stroke-width="32"/>
+  <circle cx="256" cy="256" r="106" fill="#111937"/>
+
+  <path d="M154 270 C183 217 220 204 256 204 C293 204 329 217 359 270" fill="none" stroke="#53fff2" stroke-width="18" stroke-linecap="round"/>
+  <path d="M176 312 Q256 364 336 312" fill="none" stroke="#ff7fe8" stroke-width="18" stroke-linecap="round"/>
+
+  <rect x="108" y="390" width="296" height="20" rx="10" fill="#5e76ff" opacity="0.85"/>
+  <rect x="138" y="368" width="236" height="12" rx="6" fill="#53fff2" opacity="0.85"/>
+</svg>
