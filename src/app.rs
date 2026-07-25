@@ -98,9 +98,18 @@ impl eframe::App for RgmApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("🚀 GPU Monitor");
+            let device_label = if self.gpu_info.device_count > 1 {
+                // Only device 0 is monitored; tell multi-GPU users the others exist.
+                format!(
+                    "GPU 0 of {}: {}",
+                    self.gpu_info.device_count, self.gpu_info.name
+                )
+            } else {
+                self.gpu_info.name.clone()
+            };
             ui.label(format!(
                 "{} - Driver: {}",
-                self.gpu_info.name, self.gpu_info.driver_version
+                device_label, self.gpu_info.driver_version
             ));
             ui.add_space(8.0);
 

@@ -50,6 +50,8 @@ impl GpuMonitor for NvmlMonitor {
             .sys_driver_version()
             .unwrap_or_else(|_| "N/A".to_string());
 
+        let device_count = self.nvml.device_count().unwrap_or(1);
+
         let Ok(device) = self.nvml.device_by_index(self.device_index) else {
             return GpuInfo {
                 name: "N/A".to_string(),
@@ -58,6 +60,7 @@ impl GpuMonitor for NvmlMonitor {
                 vbios_version: "N/A".to_string(),
                 pcie_gen: 0,
                 pcie_width: 0,
+                device_count,
             };
         };
 
@@ -68,6 +71,7 @@ impl GpuMonitor for NvmlMonitor {
             vbios_version: device.vbios_version().unwrap_or_else(|_| "N/A".to_string()),
             pcie_gen: device.current_pcie_link_gen().unwrap_or(0),
             pcie_width: device.current_pcie_link_width().unwrap_or(0),
+            device_count,
         }
     }
 
@@ -174,12 +178,16 @@ fn merge_process_lists(mut base: Vec<ProcessInfo>, extra: Vec<ProcessInfo>) -> V
 pub struct AmdgpuMonitor {
     gpu_handle: GpuHandle,
     start_time: std::time::Instant,
+    device_count: u32,
 }
 
 impl AmdgpuMonitor {
     /// Try to find and initialise the first AMD GPU driven by `amdgpu`.
     pub fn new() -> Result<Self, MonitorError> {
-        let sysfs_path = Self::find_amdgpu_device()
+        let devices = Self::find_amdgpu_devices();
+        let sysfs_path = devices
+            .first()
+            .cloned()
             .ok_or_else(|| MonitorError::SamplingFailed("No amdgpu device found".into()))?;
 
         let gpu_handle = GpuHandle::new_from_path(sysfs_path)
@@ -188,13 +196,16 @@ impl AmdgpuMonitor {
         Ok(Self {
             gpu_handle,
             start_time: std::time::Instant::now(),
+            device_count: devices.len() as u32,
         })
     }
 
-    /// Scan `/sys/class/drm/card*/device/` for the first device using the
-    /// `amdgpu` kernel driver.
-    fn find_amdgpu_device() -> Option<PathBuf> {
-        let drm_dir = std::fs::read_dir("/sys/class/drm").ok()?;
+    /// Scan `/sys/class/drm/card*/device/` for devices using the `amdgpu`
+    /// kernel driver, in card order.
+    fn find_amdgpu_devices() -> Vec<PathBuf> {
+        let Ok(drm_dir) = std::fs::read_dir("/sys/class/drm") else {
+            return Vec::new();
+        };
         let mut cards: Vec<_> = drm_dir
             .filter_map(|e| e.ok())
             .filter(|e| {
@@ -206,16 +217,17 @@ impl AmdgpuMonitor {
             .collect();
         cards.sort_by_key(|e| e.file_name());
 
-        for entry in cards {
-            let device_path = entry.path().join("device");
-            let uevent_path = device_path.join("uevent");
-            if let Ok(uevent) = std::fs::read_to_string(&uevent_path) {
-                if uevent.lines().any(|l| l == "DRIVER=amdgpu") {
-                    return Some(device_path);
-                }
-            }
-        }
-        None
+        cards
+            .into_iter()
+            .filter_map(|entry| {
+                let device_path = entry.path().join("device");
+                let uevent = std::fs::read_to_string(device_path.join("uevent")).ok()?;
+                uevent
+                    .lines()
+                    .any(|l| l == "DRIVER=amdgpu")
+                    .then_some(device_path)
+            })
+            .collect()
     }
 
     /// Read the "edge" (or first available) temperature in °C from hwmon.
@@ -304,6 +316,7 @@ impl GpuMonitor for AmdgpuMonitor {
             vbios_version,
             pcie_gen,
             pcie_width,
+            device_count: self.device_count,
         }
     }
 

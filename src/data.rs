@@ -24,6 +24,9 @@ pub struct GpuInfo {
     pub pcie_width: u32,
     pub driver_version: String,
     pub vbios_version: String,
+    /// Number of GPUs the backend can see; only device 0 is monitored today,
+    /// so the UI labels the device "GPU 0 of N" when N > 1.
+    pub device_count: u32,
 }
 
 // Process information structure, storing information about GPU processes
