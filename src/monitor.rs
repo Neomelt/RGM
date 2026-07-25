@@ -75,30 +75,36 @@ impl GpuMonitor for NvmlMonitor {
         // Temporarily get the device object when needed
         let device = self.nvml.device_by_index(self.device_index)?;
 
-        let (util, mem, temp) = (
-            device.utilization_rates()?,
-            device.memory_info()?,
-            device.temperature(TemperatureSensor::Gpu)?,
-        );
+        // Utilization and memory are the core metrics — without them the
+        // sample is meaningless, so their errors still fail the call. All
+        // remaining sensors degrade to 0 individually (some are unavailable
+        // on vGPU/laptop setups), matching the AMD backend's convention.
+        let util = device.utilization_rates()?;
+        let mem = device.memory_info()?;
+        let temp = device.temperature(TemperatureSensor::Gpu).unwrap_or(0);
 
         let gpu_clock = device.clock_info(Clock::Graphics).unwrap_or(0);
         let mem_clock = device.clock_info(Clock::Memory).unwrap_or(0);
 
-        let (power_usage, power_limit) =
-            match (device.power_usage(), device.power_management_limit()) {
-                (Ok(usage), Ok(limit)) => (usage as f64 / 1000.0, limit as f64 / 1000.0),
-                _ => (0.0, 0.0),
-            };
+        let power_usage = device
+            .power_usage()
+            .map(|v| v as f64 / 1000.0)
+            .unwrap_or(0.0);
+        let power_limit = device
+            .power_management_limit()
+            .map(|v| v as f64 / 1000.0)
+            .unwrap_or(0.0);
 
         let fan_speed = device.fan_speed(0).unwrap_or(0);
 
-        let (pcie_tx, pcie_rx) = match (
-            device.pcie_throughput(PcieUtilCounter::Send),
-            device.pcie_throughput(PcieUtilCounter::Receive),
-        ) {
-            (Ok(tx), Ok(rx)) => (tx as f64 / 1024.0, rx as f64 / 1024.0),
-            _ => (0.0, 0.0),
-        };
+        let pcie_tx = device
+            .pcie_throughput(PcieUtilCounter::Send)
+            .map(|v| v as f64 / 1024.0)
+            .unwrap_or(0.0);
+        let pcie_rx = device
+            .pcie_throughput(PcieUtilCounter::Receive)
+            .map(|v| v as f64 / 1024.0)
+            .unwrap_or(0.0);
 
         let gpu_data = GpuData {
             timestamp: self.start_time.elapsed().as_secs_f64(),
