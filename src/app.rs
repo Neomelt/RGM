@@ -280,6 +280,9 @@ impl RgmApp {
         });
         let mut plot = Plot::new(id)
             .height(height)
+            // Uniform axis width keeps the plot areas of all sparklines
+            // left-aligned regardless of tick label widths (100 vs 10).
+            .y_axis_min_width(34.0)
             .allow_drag(false)
             .allow_zoom(false)
             .allow_scroll(false)
