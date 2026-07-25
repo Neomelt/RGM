@@ -20,6 +20,7 @@ nvml-wrapper = "0.11.0"
 amdgpu-sysfs = "0.19"
 thiserror = "2.0.16"
 crossbeam-channel = "0.5"
+egui_extras = "0.32"
 
 [package.metadata.deb]
 maintainer = "Neomelt <niezhenghua2004@gmail.com>"
