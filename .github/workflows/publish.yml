@@ -1,0 +1,43 @@
+name: Publish to crates.io
+
+# Manual backfill: publish an already-tagged version to crates.io.
+# Normal releases publish automatically from release.yml; this exists for
+# tags that predate the automated step (e.g. v0.3.0).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (e.g. v0.3.0)"
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag matches Cargo.toml version
+        run: |
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          TAG_VERSION="${TAG_INPUT#v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag ${TAG_INPUT} does not match Cargo.toml version ${CARGO_VERSION}."
+            exit 1
+          fi
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked
