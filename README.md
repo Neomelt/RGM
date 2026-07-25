@@ -48,10 +48,6 @@ If you have Rust installed, you can install RGM directly from crates.io:
 cargo install rgm_ui
 ```
 
-> **Note:** crates.io publishing is currently paused — the latest version
-> there is **0.2.2**, which predates several fixes. Prefer Method 1 (or
-> Method 3) until publishing resumes.
-
 ### Method 3: Build from Source
 
 1.  **Clone the repository:**
