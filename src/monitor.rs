@@ -443,4 +443,22 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].pid, 3);
     }
+
+    #[test]
+    fn parse_pcie_gen_maps_nominal_rates() {
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("2.5 GT/s PCIe"), Some(1));
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("5.0 GT/s PCIe"), Some(2));
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("8.0 GT/s PCIe"), Some(3));
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("16.0 GT/s PCIe"), Some(4));
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("32.0 GT/s PCIe"), Some(5));
+    }
+
+    #[test]
+    fn parse_pcie_gen_rejects_unparseable_input() {
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen(""), None);
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("Unknown"), None);
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("GT/s"), None);
+        // Below the Gen1 threshold
+        assert_eq!(AmdgpuMonitor::parse_pcie_gen("1.0 GT/s"), None);
+    }
 }
