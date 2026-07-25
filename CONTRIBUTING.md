@@ -33,7 +33,12 @@ cargo generate-rpm
 ## Release Process
 - Releases are tag-driven via `.github/workflows/release.yml`.
 - Push a semantic tag like `v0.2.6` to trigger packaging and release publication.
-- Keep `Cargo.toml` version aligned with release tag.
+- Keep `Cargo.toml` version aligned with release tag — the workflow fails fast
+  on a mismatch (v0.2.3/v0.2.4 shipped packages labeled 0.2.2 before this gate).
+- crates.io publishing is paused: the `cargo publish` step was removed in
+  897b31c and the crate is stuck at 0.2.2. To resume, add a publish step with a
+  `CARGO_REGISTRY_TOKEN` repository secret and remove the stale-version note
+  from README Method 2.
 
 ## Commit Message Convention
 Use Conventional Commits:
