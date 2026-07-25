@@ -10,12 +10,20 @@ permissions:
 
 jobs:
   build-and-release:
-    # Pinned to the oldest supported GitHub runner: the glibc the binary is
-    # linked against sets the floor for every user (building on ubuntu-latest
-    # produced binaries requiring glibc 2.39, which fail to start on
-    # Ubuntu 22.04 / Debian 12). This build requires glibc >= 2.35.
-    runs-on: ubuntu-22.04
+    # The glibc the binary is linked against sets the floor for every user:
+    # building on ubuntu-latest produced binaries requiring glibc 2.39, which
+    # fail to start on Ubuntu 22.04 / Debian 12. Building inside an
+    # ubuntu:22.04 container keeps the floor at glibc 2.35 without depending
+    # on the ubuntu-22.04 runner label, which is scheduled for retirement
+    # (actions/runner-images#14254).
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
     steps:
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y curl git ca-certificates build-essential pkg-config libudev-dev jq
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -31,11 +39,6 @@ jobs:
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}. Bump Cargo.toml before tagging."
             exit 1
           fi
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev
 
       - name: Install cargo-deb and cargo-generate-rpm
         run: |
