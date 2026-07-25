@@ -26,6 +26,9 @@ pub struct RgmApp {
     /// Wall-clock time of the last received sample, used to flag stale data
     /// when the sampling thread keeps erroring (e.g. after a GPU reset).
     last_sample_at: Option<Instant>,
+    /// Staleness baseline before any sample arrives, so sampling that fails
+    /// from the very first attempt is also visible in the UI.
+    started_at: Instant,
 }
 
 impl RgmApp {
@@ -70,6 +73,7 @@ impl RgmApp {
             processes,
             init_error,
             last_sample_at: None,
+            started_at: Instant::now(),
         }
     }
 }
@@ -123,17 +127,19 @@ impl eframe::App for RgmApp {
                 "{} - Driver: {}",
                 device_label, self.gpu_info.driver_version
             ));
-            if let Some(last) = self.last_sample_at {
-                let since = last.elapsed();
-                if since > STALE_AFTER {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "⚠ Data is stale ({:.0}s old) — sampling is failing, see terminal output",
-                            since.as_secs_f64()
-                        ))
-                        .color(Color32::from_rgb(255, 180, 0)),
-                    );
-                }
+            let stale_msg = match self.last_sample_at {
+                Some(last) if last.elapsed() > STALE_AFTER => Some(format!(
+                    "⚠ Data is stale ({:.0}s old) — sampling is failing, see terminal output",
+                    last.elapsed().as_secs_f64()
+                )),
+                None if self.started_at.elapsed() > STALE_AFTER => Some(format!(
+                    "⚠ No samples received in {:.0}s — sampling is failing, see terminal output",
+                    self.started_at.elapsed().as_secs_f64()
+                )),
+                _ => None,
+            };
+            if let Some(msg) = stale_msg {
+                ui.label(egui::RichText::new(msg).color(Color32::from_rgb(255, 180, 0)));
             }
             ui.add_space(8.0);
 
