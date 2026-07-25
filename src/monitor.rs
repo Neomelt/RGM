@@ -365,21 +365,30 @@ impl GpuMonitor for AmdgpuMonitor {
 
 // ── Factory ─────────────────────────────────────────────────────────────────
 
-pub fn create_monitor() -> Option<Box<dyn GpuMonitor>> {
+pub fn create_monitor() -> Result<Box<dyn GpuMonitor>, String> {
     // Try NVIDIA first
-    if let Ok(monitor) = NvmlMonitor::new(0) {
-        println!("✅ NVML monitor initialized successfully.");
-        return Some(Box::new(monitor));
-    }
+    let nvml_err = match NvmlMonitor::new(0) {
+        Ok(monitor) => {
+            println!("✅ NVML monitor initialized successfully.");
+            return Ok(Box::new(monitor));
+        }
+        Err(e) => e,
+    };
 
     // Try AMD (amdgpu driver via sysfs)
-    if let Ok(monitor) = AmdgpuMonitor::new() {
-        println!("✅ AMDGPU monitor initialized successfully.");
-        return Some(Box::new(monitor));
-    }
+    let amd_err = match AmdgpuMonitor::new() {
+        Ok(monitor) => {
+            println!("✅ AMDGPU monitor initialized successfully.");
+            return Ok(Box::new(monitor));
+        }
+        Err(e) => e,
+    };
 
-    println!("❌ No compatible GPU monitors found.");
-    None
+    // Keep both concrete errors: a broken NVIDIA driver install looks very
+    // different from "no GPU present", and the user needs to know which.
+    Err(format!(
+        "NVIDIA (NVML): {nvml_err}\nAMD (amdgpu sysfs): {amd_err}"
+    ))
 }
 
 #[cfg(test)]

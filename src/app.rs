@@ -13,6 +13,9 @@ pub struct RgmApp {
     display_duration: f64,
     gpu_info: GpuInfo,
     processes: Vec<ProcessInfo>,
+    /// Set when no GPU monitor could be initialized; the UI then shows the
+    /// error instead of metrics (a desktop-launched app has no visible stderr).
+    init_error: Option<String>,
 }
 
 impl RgmApp {
@@ -21,22 +24,29 @@ impl RgmApp {
         let data = VecDeque::with_capacity(120);
         let processes = Vec::new();
 
-        let monitor = create_monitor().expect("Failed to find and initialize a GPU monitor!");
-        let gpu_info = monitor.get_static_info();
-
-        thread::spawn(move || loop {
-            match monitor.sample() {
-                Ok((gpu_data, proc_infos)) => {
-                    if sender.send((gpu_data, proc_infos)).is_err() {
-                        break;
+        let (gpu_info, init_error) = match create_monitor() {
+            Ok(monitor) => {
+                let gpu_info = monitor.get_static_info();
+                thread::spawn(move || loop {
+                    match monitor.sample() {
+                        Ok((gpu_data, proc_infos)) => {
+                            if sender.send((gpu_data, proc_infos)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error sampling GPU data: {}", e);
+                        }
                     }
-                }
-                Err(e) => {
-                    eprintln!("Error sampling GPU data: {}", e);
-                }
+                    thread::sleep(Duration::from_millis(100));
+                });
+                (gpu_info, None)
             }
-            thread::sleep(Duration::from_millis(100));
-        });
+            Err(err) => {
+                eprintln!("❌ No compatible GPU monitor found.\n{err}");
+                (GpuInfo::default(), Some(err))
+            }
+        };
 
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals.dark_mode = true;
@@ -48,12 +58,30 @@ impl RgmApp {
             display_duration: 10.0,
             gpu_info,
             processes,
+            init_error,
         }
     }
 }
 
 impl eframe::App for RgmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(err) = &self.init_error {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(80.0);
+                    ui.heading("⚠ No supported GPU detected");
+                    ui.add_space(16.0);
+                    ui.label(err);
+                    ui.add_space(16.0);
+                    ui.label(
+                        "RGM requires an NVIDIA GPU with the official driver (NVML) \
+                         or an AMD GPU using the amdgpu kernel driver.",
+                    );
+                });
+            });
+            return;
+        }
+
         while let Ok((gpu_data, proc_infos)) = self.receiver.try_recv() {
             let now = gpu_data.timestamp;
             let window_start_time = (now - self.display_duration).max(0.0);
