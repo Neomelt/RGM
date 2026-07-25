@@ -1,8 +1,9 @@
 use crate::data::{GpuData, GpuInfo, ProcessInfo};
 use crate::monitor::create_monitor;
 use crossbeam_channel::{bounded, Receiver};
-use eframe::egui::{self, Color32};
-use egui_plot::{Legend, Line, Plot, PlotPoints};
+use eframe::egui::{self, Color32, RichText, Sense};
+use egui_extras::{Column, TableBuilder};
+use egui_plot::{Line, Plot, PlotPoints};
 use std::collections::VecDeque;
 use std::time::Instant;
 use std::{thread, time::Duration};
@@ -12,6 +13,20 @@ const SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
 
 /// After this long without a fresh sample the UI flags the data as stale.
 const STALE_AFTER: Duration = Duration::from_secs(2);
+
+// Metric palette, validated for CVD separation and contrast on the dark
+// surface in this on-screen adjacency order (blue, orange, aqua, yellow).
+// One color per metric, used consistently across cards and sparklines.
+const COL_UTIL: Color32 = Color32::from_rgb(0x39, 0x87, 0xE5);
+const COL_TEMP: Color32 = Color32::from_rgb(0xD9, 0x59, 0x26);
+const COL_MEM: Color32 = Color32::from_rgb(0x19, 0x9E, 0x70);
+const COL_POWER: Color32 = Color32::from_rgb(0xC9, 0x85, 0x00);
+
+const SURFACE: Color32 = Color32::from_rgb(0x1A, 0x1A, 0x19);
+const CARD_FILL: Color32 = Color32::from_rgb(0x24, 0x24, 0x22);
+const PLOT_BG: Color32 = Color32::from_rgb(0x14, 0x14, 0x13);
+const TEXT_SECONDARY: Color32 = Color32::from_rgb(0xC3, 0xC2, 0xB7);
+const WARN: Color32 = Color32::from_rgb(0xFF, 0xB4, 0x00);
 
 // Main application structure
 pub struct RgmApp {
@@ -63,6 +78,9 @@ impl RgmApp {
 
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals.dark_mode = true;
+        style.visuals.panel_fill = SURFACE;
+        style.visuals.extreme_bg_color = PLOT_BG;
+        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
         cc.egui_ctx.set_style(style);
 
         Self {
@@ -76,6 +94,308 @@ impl RgmApp {
             started_at: Instant::now(),
         }
     }
+
+    fn header(&self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("GPU Monitor").size(20.0).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let device_label = if self.gpu_info.device_count > 1 {
+                    // Only device 0 is monitored; tell multi-GPU users the others exist.
+                    format!(
+                        "GPU 0 of {}: {}",
+                        self.gpu_info.device_count, self.gpu_info.name
+                    )
+                } else {
+                    self.gpu_info.name.clone()
+                };
+                ui.label(
+                    RichText::new(format!(
+                        "{} · Driver {}",
+                        device_label, self.gpu_info.driver_version
+                    ))
+                    .color(TEXT_SECONDARY)
+                    .size(12.0),
+                );
+            });
+        });
+
+        let stale_msg = match self.last_sample_at {
+            Some(last) if last.elapsed() > STALE_AFTER => Some(format!(
+                "⚠ Data is stale ({:.0}s old) — sampling is failing, see terminal output",
+                last.elapsed().as_secs_f64()
+            )),
+            None if self.started_at.elapsed() > STALE_AFTER => Some(format!(
+                "⚠ No samples received in {:.0}s — sampling is failing, see terminal output",
+                self.started_at.elapsed().as_secs_f64()
+            )),
+            _ => None,
+        };
+        if let Some(msg) = stale_msg {
+            ui.label(RichText::new(msg).color(WARN));
+        }
+    }
+
+    fn stat_cards(&self, ui: &mut egui::Ui, latest: &GpuData) {
+        ui.columns(4, |cols| {
+            stat_card(
+                &mut cols[0],
+                COL_UTIL,
+                "Utilization",
+                format!("{:.0}%", latest.utilization),
+                format!("GPU {} MHz", latest.gpu_clock),
+                Some(latest.utilization / 100.0),
+            );
+            stat_card(
+                &mut cols[1],
+                COL_TEMP,
+                "Temperature",
+                format!("{}°C", latest.temperature),
+                format!("Fan {}%", latest.fan_speed),
+                Some(latest.temperature as f32 / 100.0),
+            );
+            let (mem_sub, mem_frac) = if latest.memory_total > f64::EPSILON {
+                (
+                    format!(
+                        "of {:.2} GB · {} MHz",
+                        latest.memory_total, latest.memory_clock
+                    ),
+                    Some((latest.memory_used / latest.memory_total) as f32),
+                )
+            } else {
+                (format!("VRAM · {} MHz", latest.memory_clock), None)
+            };
+            stat_card(
+                &mut cols[2],
+                COL_MEM,
+                "Memory",
+                format!("{:.2} GB", latest.memory_used),
+                mem_sub,
+                mem_frac,
+            );
+            let (power_sub, power_frac) = if latest.power_limit > 0.0 {
+                (
+                    format!("limit {:.0} W", latest.power_limit),
+                    Some((latest.power_usage / latest.power_limit) as f32),
+                )
+            } else {
+                ("no reported limit".to_string(), None)
+            };
+            stat_card(
+                &mut cols[3],
+                COL_POWER,
+                "Power",
+                format!("{:.1} W", latest.power_usage),
+                power_sub,
+                power_frac,
+            );
+        });
+
+        ui.label(
+            RichText::new(format!(
+                "PCIe Gen {} ×{} · TX {:.2} MB/s · RX {:.2} MB/s",
+                self.gpu_info.pcie_gen,
+                self.gpu_info.pcie_width,
+                latest.pcie_throughput_tx,
+                latest.pcie_throughput_rx
+            ))
+            .color(TEXT_SECONDARY)
+            .size(11.0),
+        );
+    }
+
+    fn sparklines(&self, ui: &mut egui::Ui, latest: &GpuData) {
+        let latest_timestamp = self.data.back().map_or(0.0, |d| d.timestamp);
+        // X is negative "seconds before now", so fresh data enters at the
+        // right edge, the direction monitoring tools conventionally scroll.
+        let points = |mapper: &dyn Fn(&GpuData) -> f64| -> PlotPoints {
+            self.data
+                .iter()
+                .map(|d| [(d.timestamp - latest_timestamp).min(0.0), mapper(d)])
+                .collect()
+        };
+
+        let plot_height = ((ui.available_height() - 220.0) / 2.0 - 24.0).clamp(90.0, 160.0);
+
+        ui.columns(2, |cols| {
+            self.sparkline(
+                &mut cols[0],
+                "plot_util",
+                COL_UTIL,
+                format!("Utilization — {:.0}%", latest.utilization),
+                points(&|d| d.utilization as f64),
+                Some(100.0),
+                plot_height,
+                false,
+            );
+            self.sparkline(
+                &mut cols[1],
+                "plot_temp",
+                COL_TEMP,
+                format!("Temperature — {}°C", latest.temperature),
+                points(&|d| d.temperature as f64),
+                Some(100.0),
+                plot_height,
+                false,
+            );
+        });
+        ui.columns(2, |cols| {
+            self.sparkline(
+                &mut cols[0],
+                "plot_mem",
+                COL_MEM,
+                format!("Memory — {:.2} GB", latest.memory_used),
+                points(&|d| d.memory_used),
+                (latest.memory_total > f64::EPSILON).then_some(latest.memory_total),
+                plot_height,
+                true,
+            );
+            self.sparkline(
+                &mut cols[1],
+                "plot_power",
+                COL_POWER,
+                format!("Power — {:.1} W", latest.power_usage),
+                points(&|d| d.power_usage),
+                (latest.power_limit > 0.0).then_some(latest.power_limit),
+                plot_height,
+                true,
+            );
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn sparkline(
+        &self,
+        ui: &mut egui::Ui,
+        id: &str,
+        color: Color32,
+        title: String,
+        points: PlotPoints<'static>,
+        y_max: Option<f64>,
+        height: f32,
+        show_x_label: bool,
+    ) {
+        ui.horizontal(|ui| {
+            identity_dot(ui, color);
+            ui.label(RichText::new(title).color(TEXT_SECONDARY).size(12.0));
+        });
+        let mut plot = Plot::new(id)
+            .height(height)
+            .allow_drag(false)
+            .allow_zoom(false)
+            .allow_scroll(false)
+            .allow_boxed_zoom(false)
+            .include_x(-self.display_duration)
+            .include_x(0.0)
+            .include_y(0.0)
+            // Horizontal gridlines guide value reading; vertical ones only
+            // clutter a 10-second sliding window.
+            .show_grid([false, true])
+            .show_axes([show_x_label, true])
+            .show_x(true)
+            .show_y(true);
+        if let Some(m) = y_max {
+            plot = plot.include_y(m);
+        }
+        if show_x_label {
+            plot = plot.x_axis_label(RichText::new("seconds (now = 0)").size(10.0));
+        }
+        plot.show(ui, |plot_ui| {
+            plot_ui.line(
+                Line::new("", points)
+                    .color(color)
+                    .width(2.0)
+                    .fill(0.0)
+                    .fill_alpha(0.15),
+            );
+        });
+    }
+
+    fn process_table(&self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("Processes").color(TEXT_SECONDARY).size(12.0));
+        let mut procs: Vec<&ProcessInfo> = self.processes.iter().collect();
+        procs.sort_by_key(|p| std::cmp::Reverse(p.memory_usage));
+
+        TableBuilder::new(ui)
+            .striped(true)
+            .column(Column::exact(64.0))
+            .column(Column::remainder())
+            .column(Column::exact(110.0))
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(RichText::new("PID").strong().size(12.0));
+                });
+                header.col(|ui| {
+                    ui.label(RichText::new("Name").strong().size(12.0));
+                });
+                header.col(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(RichText::new("Memory (MB)").strong().size(12.0));
+                    });
+                });
+            })
+            .body(|mut body| {
+                for proc in procs {
+                    body.row(18.0, |mut row| {
+                        row.col(|ui| {
+                            ui.label(proc.pid.to_string());
+                        });
+                        row.col(|ui| {
+                            ui.label(&proc.name);
+                        });
+                        row.col(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(format!(
+                                        "{:.1}",
+                                        proc.memory_usage as f64 / 1024.0 / 1024.0
+                                    ));
+                                },
+                            );
+                        });
+                    });
+                }
+            });
+    }
+}
+
+/// A compact stat card: identity dot + label, large value, secondary line,
+/// and an optional slim fill bar when the metric has a natural maximum.
+fn stat_card(
+    ui: &mut egui::Ui,
+    accent: Color32,
+    label: &str,
+    value: String,
+    sub: String,
+    frac: Option<f32>,
+) {
+    egui::Frame::new()
+        .fill(CARD_FILL)
+        .corner_radius(8)
+        .inner_margin(egui::Margin::symmetric(12, 10))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                identity_dot(ui, accent);
+                ui.label(RichText::new(label).color(TEXT_SECONDARY).size(12.0));
+            });
+            ui.label(RichText::new(value).size(22.0).strong());
+            ui.label(RichText::new(sub).color(TEXT_SECONDARY).size(11.0));
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), Sense::hover());
+            if let Some(f) = frac {
+                let painter = ui.painter();
+                painter.rect_filled(rect, 2.0, Color32::from_gray(50));
+                let mut fill = rect;
+                fill.set_width(rect.width() * f.clamp(0.0, 1.0));
+                painter.rect_filled(fill, 2.0, accent);
+            }
+        });
+}
+
+fn identity_dot(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.0, color);
 }
 
 impl eframe::App for RgmApp {
@@ -113,166 +433,20 @@ impl eframe::App for RgmApp {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("🚀 GPU Monitor");
-            let device_label = if self.gpu_info.device_count > 1 {
-                // Only device 0 is monitored; tell multi-GPU users the others exist.
-                format!(
-                    "GPU 0 of {}: {}",
-                    self.gpu_info.device_count, self.gpu_info.name
-                )
+            self.header(ui);
+
+            if let Some(latest) = self.data.back().cloned() {
+                ui.add_space(4.0);
+                self.stat_cards(ui, &latest);
+                ui.add_space(6.0);
+                self.sparklines(ui, &latest);
+                ui.add_space(6.0);
+                ui.separator();
+                self.process_table(ui);
             } else {
-                self.gpu_info.name.clone()
-            };
-            ui.label(format!(
-                "{} - Driver: {}",
-                device_label, self.gpu_info.driver_version
-            ));
-            let stale_msg = match self.last_sample_at {
-                Some(last) if last.elapsed() > STALE_AFTER => Some(format!(
-                    "⚠ Data is stale ({:.0}s old) — sampling is failing, see terminal output",
-                    last.elapsed().as_secs_f64()
-                )),
-                None if self.started_at.elapsed() > STALE_AFTER => Some(format!(
-                    "⚠ No samples received in {:.0}s — sampling is failing, see terminal output",
-                    self.started_at.elapsed().as_secs_f64()
-                )),
-                _ => None,
-            };
-            if let Some(msg) = stale_msg {
-                ui.label(egui::RichText::new(msg).color(Color32::from_rgb(255, 180, 0)));
+                ui.add_space(8.0);
+                ui.label(RichText::new("Waiting for the first sample…").color(TEXT_SECONDARY));
             }
-            ui.add_space(8.0);
-
-            let latest = self.data.back();
-
-            if let Some(latest) = latest {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "GPU Utilization: {}%",
-                                    latest.utilization
-                                ))
-                                .color(Color32::GREEN)
-                                .size(22.0)
-                                .strong(),
-                            );
-                            ui.label(format!("Temperature: {}°C", latest.temperature));
-                            ui.label(format!("Fan Speed: {}%", latest.fan_speed));
-                        });
-                        ui.separator();
-                        ui.vertical(|ui| {
-                            ui.label(format!(
-                                "Memory: {:.2}/{:.2} GB",
-                                latest.memory_used, latest.memory_total
-                            ));
-                            ui.label(format!(
-                                "Power: {:.2}/{:.2} W",
-                                latest.power_usage, latest.power_limit
-                            ));
-                            ui.label(format!("GPU Clock: {} MHz", latest.gpu_clock));
-                            ui.label(format!("Memory Clock: {} MHz", latest.memory_clock));
-                        });
-                        ui.separator();
-                        ui.vertical(|ui| {
-                            ui.label(format!(
-                                "PCIe: Gen {} x{}",
-                                self.gpu_info.pcie_gen, self.gpu_info.pcie_width
-                            ));
-                            ui.label(format!("PCIe TX: {:.2} MB/s", latest.pcie_throughput_tx));
-                            ui.label(format!("PCIe RX: {:.2} MB/s", latest.pcie_throughput_rx));
-                        });
-                    });
-                });
-            }
-
-            ui.add_space(12.0);
-            ui.separator();
-            ui.heading("📈 Real-time GPU Metrics (Last 10 Seconds)");
-
-            let latest_timestamp = self.data.back().map_or(0.0, |d| d.timestamp);
-            let to_relative_points = |mapper: Box<dyn Fn(&GpuData) -> f64>| -> PlotPoints {
-                self.data
-                    .iter()
-                    .map(|data| {
-                        let x = latest_timestamp - data.timestamp;
-                        [x.max(0.0), mapper(data)]
-                    })
-                    .collect()
-            };
-            let gpu_util_points: PlotPoints =
-                to_relative_points(Box::new(|d| d.utilization as f64));
-            let memory_points: PlotPoints = to_relative_points(Box::new(|d| {
-                if d.memory_total > f64::EPSILON {
-                    d.memory_used / d.memory_total * 100.0
-                } else {
-                    0.0
-                }
-            }));
-            let temp_points: PlotPoints = to_relative_points(Box::new(|d| d.temperature as f64));
-            let power_points: PlotPoints = self
-                .data
-                .iter()
-                .filter(|data| data.power_limit > 0.0)
-                .map(|data| {
-                    let x = latest_timestamp - data.timestamp;
-                    [x.max(0.0), data.power_usage / data.power_limit * 100.0]
-                })
-                .collect();
-
-            Plot::new("gpu_metrics_plot")
-                .view_aspect(2.5)
-                .legend(Legend::default())
-                .include_y(0.0)
-                .include_y(100.0)
-                .include_x(0.0)
-                .include_x(self.display_duration)
-                .x_axis_label("Seconds Ago (0 = now)")
-                .show_x(true)
-                .show_y(true)
-                .show(ui, |plot_ui| {
-                    plot_ui
-                        .line(Line::new("GPU Utilization", gpu_util_points).color(Color32::GREEN));
-                    plot_ui.line(
-                        Line::new("Memory Usage (%)", memory_points)
-                            .color(Color32::from_rgb(0, 128, 255)),
-                    );
-                    plot_ui.line(
-                        Line::new("Temperature (°C)", temp_points)
-                            .color(Color32::from_rgb(255, 128, 0)),
-                    );
-                    plot_ui.line(
-                        Line::new("Power Usage (%)", power_points)
-                            .color(Color32::from_rgb(255, 0, 128)),
-                    );
-                });
-
-            ui.add_space(12.0);
-            ui.separator();
-            ui.heading("🧩 GPU Processes");
-            egui::ScrollArea::vertical()
-                .max_height(200.0)
-                .show(ui, |ui| {
-                    egui::Grid::new("processes_grid")
-                        .striped(true)
-                        .spacing([12.0, 6.0])
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new("PID").strong());
-                            ui.label(egui::RichText::new("Name").strong());
-                            ui.label(egui::RichText::new("Memory (MB)").strong());
-                            ui.end_row();
-                            for proc in self.processes.iter() {
-                                ui.label(proc.pid.to_string());
-                                ui.label(&proc.name);
-                                ui.label(format!(
-                                    "{:.1}",
-                                    proc.memory_usage as f64 / 1024.0 / 1024.0
-                                ));
-                                ui.end_row();
-                            }
-                        });
-                });
         });
 
         // New data arrives every SAMPLE_INTERVAL; repainting faster than that
