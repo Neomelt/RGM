@@ -4,23 +4,22 @@ use crossbeam_channel::{bounded, Receiver};
 use eframe::egui::{self, Color32};
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 use std::{thread, time::Duration};
 
 // Main application structure
 pub struct RgmApp {
-    data: Arc<Mutex<VecDeque<GpuData>>>,
+    data: VecDeque<GpuData>,
     receiver: Receiver<(GpuData, Vec<ProcessInfo>)>,
     display_duration: f64,
     gpu_info: GpuInfo,
-    processes: Arc<Mutex<Vec<ProcessInfo>>>,
+    processes: Vec<ProcessInfo>,
 }
 
 impl RgmApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (sender, receiver) = bounded(100);
-        let data = Arc::new(Mutex::new(VecDeque::with_capacity(120)));
-        let processes = Arc::new(Mutex::new(Vec::new()));
+        let data = VecDeque::with_capacity(120);
+        let processes = Vec::new();
 
         let monitor = create_monitor().expect("Failed to find and initialize a GPU monitor!");
         let gpu_info = monitor.get_static_info();
@@ -56,18 +55,17 @@ impl RgmApp {
 impl eframe::App for RgmApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         while let Ok((gpu_data, proc_infos)) = self.receiver.try_recv() {
-            let mut data = self.data.lock().unwrap();
             let now = gpu_data.timestamp;
             let window_start_time = (now - self.display_duration).max(0.0);
-            data.push_back(gpu_data);
-            while data
+            self.data.push_back(gpu_data);
+            while self
+                .data
                 .front()
                 .is_some_and(|d| d.timestamp < window_start_time)
             {
-                data.pop_front();
+                self.data.pop_front();
             }
-            let mut processes = self.processes.lock().unwrap();
-            *processes = proc_infos;
+            self.processes = proc_infos;
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -78,8 +76,7 @@ impl eframe::App for RgmApp {
             ));
             ui.add_space(8.0);
 
-            let data_guard = self.data.lock().unwrap();
-            let latest = data_guard.back();
+            let latest = self.data.back();
 
             if let Some(latest) = latest {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -127,9 +124,9 @@ impl eframe::App for RgmApp {
             ui.separator();
             ui.heading("📈 Real-time GPU Metrics (Last 10 Seconds)");
 
-            let latest_timestamp = data_guard.back().map_or(0.0, |d| d.timestamp);
+            let latest_timestamp = self.data.back().map_or(0.0, |d| d.timestamp);
             let to_relative_points = |mapper: Box<dyn Fn(&GpuData) -> f64>| -> PlotPoints {
-                data_guard
+                self.data
                     .iter()
                     .map(|data| {
                         let x = latest_timestamp - data.timestamp;
@@ -147,7 +144,8 @@ impl eframe::App for RgmApp {
                 }
             }));
             let temp_points: PlotPoints = to_relative_points(Box::new(|d| d.temperature as f64));
-            let power_points: PlotPoints = data_guard
+            let power_points: PlotPoints = self
+                .data
                 .iter()
                 .filter(|data| data.power_limit > 0.0)
                 .map(|data| {
@@ -189,7 +187,6 @@ impl eframe::App for RgmApp {
             egui::ScrollArea::vertical()
                 .max_height(200.0)
                 .show(ui, |ui| {
-                    let processes = self.processes.lock().unwrap();
                     egui::Grid::new("processes_grid")
                         .striped(true)
                         .spacing([12.0, 6.0])
@@ -198,7 +195,7 @@ impl eframe::App for RgmApp {
                             ui.label(egui::RichText::new("Name").strong());
                             ui.label(egui::RichText::new("Memory (MB)").strong());
                             ui.end_row();
-                            for proc in processes.iter() {
+                            for proc in self.processes.iter() {
                                 ui.label(proc.pid.to_string());
                                 ui.label(&proc.name);
                                 ui.label(format!(
