@@ -4,7 +4,14 @@ use crossbeam_channel::{bounded, Receiver};
 use eframe::egui::{self, Color32};
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 use std::collections::VecDeque;
+use std::time::Instant;
 use std::{thread, time::Duration};
+
+/// Sampling thread cadence; the UI repaint rate is throttled to match.
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
+
+/// After this long without a fresh sample the UI flags the data as stale.
+const STALE_AFTER: Duration = Duration::from_secs(2);
 
 // Main application structure
 pub struct RgmApp {
@@ -16,6 +23,9 @@ pub struct RgmApp {
     /// Set when no GPU monitor could be initialized; the UI then shows the
     /// error instead of metrics (a desktop-launched app has no visible stderr).
     init_error: Option<String>,
+    /// Wall-clock time of the last received sample, used to flag stale data
+    /// when the sampling thread keeps erroring (e.g. after a GPU reset).
+    last_sample_at: Option<Instant>,
 }
 
 impl RgmApp {
@@ -38,7 +48,7 @@ impl RgmApp {
                             eprintln!("Error sampling GPU data: {}", e);
                         }
                     }
-                    thread::sleep(Duration::from_millis(100));
+                    thread::sleep(SAMPLE_INTERVAL);
                 });
                 (gpu_info, None)
             }
@@ -59,6 +69,7 @@ impl RgmApp {
             gpu_info,
             processes,
             init_error,
+            last_sample_at: None,
         }
     }
 }
@@ -94,6 +105,7 @@ impl eframe::App for RgmApp {
                 self.data.pop_front();
             }
             self.processes = proc_infos;
+            self.last_sample_at = Some(Instant::now());
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -111,6 +123,18 @@ impl eframe::App for RgmApp {
                 "{} - Driver: {}",
                 device_label, self.gpu_info.driver_version
             ));
+            if let Some(last) = self.last_sample_at {
+                let since = last.elapsed();
+                if since > STALE_AFTER {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "⚠ Data is stale ({:.0}s old) — sampling is failing, see terminal output",
+                            since.as_secs_f64()
+                        ))
+                        .color(Color32::from_rgb(255, 180, 0)),
+                    );
+                }
+            }
             ui.add_space(8.0);
 
             let latest = self.data.back();
@@ -245,6 +269,9 @@ impl eframe::App for RgmApp {
                 });
         });
 
-        ctx.request_repaint();
+        // New data arrives every SAMPLE_INTERVAL; repainting faster than that
+        // only re-renders identical frames. Input-driven repaints still fire
+        // immediately, egui handles those on its own.
+        ctx.request_repaint_after(SAMPLE_INTERVAL);
     }
 }
