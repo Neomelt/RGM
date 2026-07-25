@@ -35,10 +35,12 @@ cargo generate-rpm
 - Push a semantic tag like `v0.2.6` to trigger packaging and release publication.
 - Keep `Cargo.toml` version aligned with release tag — the workflow fails fast
   on a mismatch (v0.2.3/v0.2.4 shipped packages labeled 0.2.2 before this gate).
-- crates.io publishing is paused: the `cargo publish` step was removed in
-  897b31c and the crate is stuck at 0.2.2. To resume, add a publish step with a
-  `CARGO_REGISTRY_TOKEN` repository secret and remove the stale-version note
-  from README Method 2.
+- crates.io publishing is wired into release.yml but requires the
+  `CARGO_REGISTRY_TOKEN` repository secret (Settings → Secrets → Actions;
+  token from crates.io → Account Settings → API Tokens with publish scope).
+  Until the secret exists the step skips with a warning and the crate stays
+  at its last published version. After the first successful publish, remove
+  the stale-version note from README Method 2.
 
 ## Commit Message Convention
 Use Conventional Commits:

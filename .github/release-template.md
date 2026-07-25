@@ -13,9 +13,8 @@
 - Other Linux: extract `rgm-linux-x86_64.tar.gz` and run `rgm/rgm`.
 - Verify downloads with `sha256sum -c --ignore-missing SHA256SUMS` (works when
   you downloaded only one of the artifacts).
-- Binaries are built on Ubuntu 22.04 and require glibc 2.35 or newer
-  (Ubuntu 22.04+, Debian 12+, Fedora 36+; RHEL 9 ships glibc 2.34 and is
-  not covered — build from source there).
+- Binaries are built against glibc 2.34 and run on RHEL 9+, Ubuntu 22.04+,
+  Debian 12+, and Fedora 36+.
 
 ## Upgrade Notes
 - No breaking migration is expected for standard users.

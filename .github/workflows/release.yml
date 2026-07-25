@@ -12,19 +12,17 @@ jobs:
   build-and-release:
     # The glibc the binary is linked against sets the floor for every user:
     # building on ubuntu-latest produced binaries requiring glibc 2.39, which
-    # fail to start on Ubuntu 22.04 / Debian 12. Building inside an
-    # ubuntu:22.04 container keeps the floor at glibc 2.35 without depending
-    # on the ubuntu-22.04 runner label, which is scheduled for retirement
+    # fail to start on Ubuntu 22.04 / Debian 12. Building inside a
+    # rockylinux:9 container (glibc 2.34) covers RHEL 9 and every newer
+    # distro, without depending on retiring runner labels
     # (actions/runner-images#14254).
     runs-on: ubuntu-latest
-    container: ubuntu:22.04
+    container: rockylinux:9
     steps:
       - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y curl git ca-certificates build-essential pkg-config libudev-dev jq
+        run: dnf install -y gcc pkg-config systemd-devel jq git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -63,7 +61,7 @@ jobs:
           cd artifacts && sha256sum * > SHA256SUMS
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: RGM ${{ github.ref_name }}
@@ -74,3 +72,16 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Runs after the GitHub release so a publish failure never blocks
+      # artifact delivery. Skips cleanly until the CARGO_REGISTRY_TOKEN
+      # repository secret is configured.
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::warning::CARGO_REGISTRY_TOKEN is not set; skipping crates.io publish"
+            exit 0
+          fi
+          cargo publish --locked
