@@ -297,7 +297,23 @@ impl RgmApp {
             plot = plot.include_y(m);
         }
         if show_x_label {
-            plot = plot.x_axis_label(RichText::new("seconds (now = 0)").size(10.0));
+            plot = plot
+                .x_grid_spacer(|_input| {
+                    [-10.0, -5.0, 0.0]
+                        .iter()
+                        .map(|&value| egui_plot::GridMark {
+                            value,
+                            step_size: 5.0,
+                        })
+                        .collect()
+                })
+                .x_axis_formatter(|mark, _range| {
+                    if mark.value >= -0.01 {
+                        "now".to_string()
+                    } else {
+                        format!("{:.0}s ago", -mark.value)
+                    }
+                });
         }
         plot.show(ui, |plot_ui| {
             plot_ui.line(

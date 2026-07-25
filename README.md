@@ -5,7 +5,7 @@
 
 A lightweight GPU monitoring utility built with Rust and egui. Supports **NVIDIA** (via NVML) and **AMD** (via sysfs/hwmon, including integrated GPUs). Simple, fast, and reliable.
 
-![RGM monitoring an NVIDIA GPU: live stats, four-series metrics plot, and the GPU process table](assets/screenshot.png)
+![RGM monitoring an NVIDIA GPU: stat cards, per-metric sparklines, and the GPU process table](assets/screenshot.png)
 
 ## Features
 
