@@ -30,11 +30,11 @@ Download the latest release for your Linux distribution from the [Releases Page]
 
 *   **Debian/Ubuntu:** Download the `.deb` file and install:
     ```bash
-    sudo dpkg -i rgm_*.deb
+    sudo dpkg -i rgm-ui_*.deb
     ```
 *   **Fedora/RHEL/openSUSE:** Download the `.rpm` file and install:
     ```bash
-    sudo rpm -i rgm-*.rpm
+    sudo rpm -U rgm_ui-*.rpm
     ```
 *   **Other Linux:** Download the `.tar.gz`, extract it, and run the binary directly.
 
@@ -61,11 +61,13 @@ cargo install rgm_ui
 
 ## Usage
 
-Run the compiled application from your terminal to see the current GPU status.
+Every install method above puts the `rgm` binary on your `PATH` (or in the app launcher):
 
 ```bash
-./target/release/rgm
+rgm
 ```
+
+For development from a source checkout, use `cargo run --release` instead.
 
 The application will auto-detect your GPU vendor and display real-time metrics.
 
