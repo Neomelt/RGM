@@ -10,7 +10,11 @@
 ## Installation
 - Debian/Ubuntu: install the `.deb` package.
 - Fedora/RHEL/openSUSE: install the `.rpm` package.
-- Other Linux: extract `rgm-linux-x86_64.tar.gz` and run `rgm`.
+- Other Linux: extract `rgm-linux-x86_64.tar.gz` and run `rgm/rgm`.
+- Verify downloads with `sha256sum -c SHA256SUMS`.
+- Binaries are built on Ubuntu 22.04 and require glibc 2.35 or newer
+  (Ubuntu 22.04+, Debian 12+, Fedora 36+; RHEL 9 ships glibc 2.34 and is
+  not covered — build from source there).
 
 ## Upgrade Notes
 - No breaking migration is expected for standard users.
