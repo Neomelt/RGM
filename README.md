@@ -38,7 +38,7 @@ Download the latest release for your Linux distribution from the [Releases Page]
     ```bash
     sudo rpm -U rgm_ui-*.rpm
     ```
-*   **Other Linux:** Download the `.tar.gz`, extract it, and run the binary directly.
+*   **Other Linux:** Download the `.tar.gz` and extract it; the binary is at `rgm/rgm` inside the archive. Run it from there or copy it into a directory on your `PATH`.
 
 ### Method 2: Install from Crates.io
 
@@ -67,11 +67,13 @@ cargo install rgm_ui
 
 ## Usage
 
-Every install method above puts the `rgm` binary on your `PATH` (or in the app launcher):
+The `.deb`/`.rpm` packages and both `cargo install` methods put the `rgm` binary on your `PATH` (the packages also add an app-launcher entry):
 
 ```bash
 rgm
 ```
+
+For the portable `.tar.gz`, run `rgm/rgm` from the extracted directory instead.
 
 For development from a source checkout, use `cargo run --release` instead.
 
