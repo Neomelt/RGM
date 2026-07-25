@@ -115,27 +115,52 @@ impl GpuMonitor for NvmlMonitor {
             pcie_throughput_rx: pcie_rx,
         };
 
-        let mut process_infos = Vec::new();
-        if let Ok(procs) = device.running_graphics_processes() {
-            for proc in procs {
-                let proc_name = std::fs::read_to_string(format!("/proc/{}/comm", proc.pid))
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_else(|_| "unknown".to_string());
-                let memory_usage = match proc.used_gpu_memory {
-                    UsedGpuMemory::Used(v) => v,
-                    _ => 0,
-                };
-                process_infos.push(ProcessInfo {
-                    pid: proc.pid,
-                    name: proc_name,
-                    memory_usage,
-                    cpu_percent: 0.0,
-                });
-            }
-        }
+        // NVML reports graphics (OpenGL/Vulkan/X) and compute (CUDA) workloads
+        // through two separate endpoints; querying only one hides the other class.
+        let graphics = device
+            .running_graphics_processes()
+            .map(to_process_infos)
+            .unwrap_or_default();
+        let compute = device
+            .running_compute_processes()
+            .map(to_process_infos)
+            .unwrap_or_default();
+        let process_infos = merge_process_lists(graphics, compute);
 
         Ok((gpu_data, process_infos))
     }
+}
+
+fn to_process_infos(
+    procs: Vec<nvml_wrapper::struct_wrappers::device::ProcessInfo>,
+) -> Vec<ProcessInfo> {
+    procs
+        .into_iter()
+        .map(|proc| ProcessInfo {
+            pid: proc.pid,
+            name: std::fs::read_to_string(format!("/proc/{}/comm", proc.pid))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "unknown".to_string()),
+            memory_usage: match proc.used_gpu_memory {
+                UsedGpuMemory::Used(v) => v,
+                _ => 0,
+            },
+            cpu_percent: 0.0,
+        })
+        .collect()
+}
+
+/// A process can appear in both the graphics and compute lists; keep one
+/// entry per PID with the larger reported memory figure.
+fn merge_process_lists(mut base: Vec<ProcessInfo>, extra: Vec<ProcessInfo>) -> Vec<ProcessInfo> {
+    for proc in extra {
+        if let Some(existing) = base.iter_mut().find(|p| p.pid == proc.pid) {
+            existing.memory_usage = existing.memory_usage.max(proc.memory_usage);
+        } else {
+            base.push(proc);
+        }
+    }
+    base
 }
 
 // ── AMD Backend ─────────────────────────────────────────────────────────────
@@ -349,4 +374,45 @@ pub fn create_monitor() -> Option<Box<dyn GpuMonitor>> {
 
     println!("❌ No compatible GPU monitors found.");
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proc(pid: u32, memory_usage: u64) -> ProcessInfo {
+        ProcessInfo {
+            pid,
+            name: format!("proc{pid}"),
+            memory_usage,
+            cpu_percent: 0.0,
+        }
+    }
+
+    #[test]
+    fn merge_keeps_distinct_pids_from_both_lists() {
+        let merged = merge_process_lists(vec![proc(1, 100)], vec![proc(2, 200)]);
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|p| p.pid == 1 && p.memory_usage == 100));
+        assert!(merged.iter().any(|p| p.pid == 2 && p.memory_usage == 200));
+    }
+
+    #[test]
+    fn merge_dedupes_shared_pid_keeping_max_memory() {
+        let merged = merge_process_lists(vec![proc(7, 100)], vec![proc(7, 300)]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].memory_usage, 300);
+
+        let merged = merge_process_lists(vec![proc(7, 500)], vec![proc(7, 300)]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].memory_usage, 500);
+    }
+
+    #[test]
+    fn merge_with_empty_lists() {
+        assert!(merge_process_lists(Vec::new(), Vec::new()).is_empty());
+        let merged = merge_process_lists(Vec::new(), vec![proc(3, 42)]);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].pid, 3);
+    }
 }
