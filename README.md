@@ -1,6 +1,6 @@
 # RGM: Rust GPU Monitor
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/xlqmu/RGM)
+[![CI](https://github.com/Neomelt/RGM/actions/workflows/ci.yml/badge.svg)](https://github.com/Neomelt/RGM/actions/workflows/ci.yml)
 [![License: MIT / Apache-2.0](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-blue)](https://opensource.org/licenses/MIT)
 
 A lightweight GPU monitoring utility built with Rust and egui. Supports **NVIDIA** (via NVML) and **AMD** (via sysfs/hwmon, including integrated GPUs). Simple, fast, and reliable.
