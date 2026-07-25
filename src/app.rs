@@ -322,9 +322,9 @@ impl RgmApp {
             plot_ui.line(
                 Line::new("", points)
                     .color(color)
-                    .width(2.0)
-                    .fill(0.0)
-                    .fill_alpha(0.15),
+                    .width(2.0_f32)
+                    .fill(0.0_f32)
+                    .fill_alpha(0.15_f32),
             );
         });
     }
@@ -404,10 +404,10 @@ fn stat_card(
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 4.0), Sense::hover());
             if let Some(f) = frac {
                 let painter = ui.painter();
-                painter.rect_filled(rect, 2.0, Color32::from_gray(50));
+                painter.rect_filled(rect, 2, Color32::from_gray(50));
                 let mut fill = rect;
                 fill.set_width(rect.width() * f.clamp(0.0, 1.0));
-                painter.rect_filled(fill, 2.0, accent);
+                painter.rect_filled(fill, 2, accent);
             }
         });
 }
