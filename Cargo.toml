@@ -4,7 +4,7 @@ version = "0.2.5"
 edition = "2021"
 description = "A Rust GPU Monitor with egui UI for NVIDIA and AMD GPUs on Linux"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Xlqmu/RGM"
+repository = "https://github.com/Neomelt/RGM"
 readme = "README.md"
 keywords = ["nvidia", "amd", "gpu", "monitor", "egui"]
 categories = ["gui", "hardware-support", "visualization"]
@@ -22,8 +22,8 @@ thiserror = "2.0.16"
 crossbeam-channel = "0.5"
 
 [package.metadata.deb]
-maintainer = "Xlqmu <xlqmu@github.com>"
-copyright = "2026, Xlqmu"
+maintainer = "Neomelt <niezhenghua2004@gmail.com>"
+copyright = "2026, Neomelt"
 extended-description = "A lightweight GPU monitoring utility with egui UI for NVIDIA and AMD GPUs on Linux"
 section = "utils"
 priority = "optional"

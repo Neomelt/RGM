@@ -26,7 +26,7 @@ Before you begin, ensure you have the following installed on your system:
 
 ### Method 1: Download Binary (Recommended)
 
-Download the latest release for your Linux distribution from the [Releases Page](https://github.com/Xlqmu/RGM/releases).
+Download the latest release for your Linux distribution from the [Releases Page](https://github.com/Neomelt/RGM/releases).
 
 *   **Debian/Ubuntu:** Download the `.deb` file and install:
     ```bash
@@ -50,7 +50,7 @@ cargo install rgm_ui
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/Xlqmu/RGM.git
+    git clone https://github.com/Neomelt/RGM.git
     cd RGM
     ```
 
