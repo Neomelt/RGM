@@ -164,15 +164,52 @@ fn to_process_infos(
         .into_iter()
         .map(|proc| ProcessInfo {
             pid: proc.pid,
-            name: std::fs::read_to_string(format!("/proc/{}/comm", proc.pid))
-                .map(|s| s.trim().to_string())
-                .unwrap_or_else(|_| "unknown".to_string()),
+            name: read_process_name(proc.pid),
             memory_usage: match proc.used_gpu_memory {
                 UsedGpuMemory::Used(v) => v,
                 _ => 0,
             },
         })
         .collect()
+}
+
+/// The kernel truncates `/proc/<pid>/comm` to TASK_COMM_LEN - 1 bytes.
+const COMM_MAX_LEN: usize = 15;
+
+fn read_process_name(pid: u32) -> String {
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
+    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+    pick_process_name(&comm, &cmdline).unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Basename of argv[0], which `/proc/<pid>/cmdline` stores NUL-separated.
+/// Only the first component is useful: Electron and Chromium processes carry
+/// kilobytes of switches after it.
+fn basename_of_argv0(cmdline: &[u8]) -> Option<String> {
+    let argv0 = cmdline.split(|&b| b == 0).find(|part| !part.is_empty())?;
+    let argv0 = String::from_utf8_lossy(argv0);
+    let base = argv0.rsplit('/').next().unwrap_or_default();
+    (!base.is_empty()).then(|| base.to_string())
+}
+
+/// `comm` is what a process calls itself and is the better label, but the
+/// kernel cuts it at 15 bytes — "xdg-desktop-por", "nvidia-persiste". cmdline
+/// is never truncated, yet its argv[0] is the interpreter for scripted
+/// programs ("python3") and the branded name for others ("Code", not "code").
+///
+/// So prefer comm, and reach for cmdline only in the one case where it is
+/// strictly more informative: comm sits exactly at the truncation limit and
+/// cmdline's basename continues it.
+fn pick_process_name(comm: &str, cmdline: &[u8]) -> Option<String> {
+    let comm = comm.trim();
+    let argv_name = basename_of_argv0(cmdline);
+    if comm.is_empty() {
+        return argv_name;
+    }
+    match argv_name {
+        Some(argv) if comm.len() >= COMM_MAX_LEN && argv.starts_with(comm) => Some(argv),
+        _ => Some(comm.to_string()),
+    }
 }
 
 /// A process can appear in both the graphics and compute lists; keep one
@@ -449,6 +486,68 @@ mod tests {
         let merged = merge_process_lists(Vec::new(), vec![proc(3, 42)]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].pid, 3);
+    }
+
+    // The comm/cmdline pairs below were read off /proc on a live desktop, so
+    // they cover the shapes that actually reach the GPU process table.
+
+    #[test]
+    fn truncated_comm_is_completed_from_cmdline() {
+        assert_eq!(
+            pick_process_name("xdg-desktop-por", b"xdg-desktop-portal-gnome\0").as_deref(),
+            Some("xdg-desktop-portal-gnome")
+        );
+        assert_eq!(
+            pick_process_name("systemd-journal", b"/usr/lib/systemd/systemd-journald\0").as_deref(),
+            Some("systemd-journald")
+        );
+    }
+
+    #[test]
+    fn truncated_comm_survives_an_interpreter_cmdline() {
+        // python3 running a script that renamed itself: cmdline's argv[0] is
+        // the interpreter, so the truncated comm is still the better label.
+        assert_eq!(
+            pick_process_name(
+                "unattended-upgr",
+                b"/usr/bin/python3\0/usr/bin/unattended-upgrade\0"
+            )
+            .as_deref(),
+            Some("unattended-upgr")
+        );
+    }
+
+    #[test]
+    fn untruncated_comm_wins_over_a_branded_argv0() {
+        assert_eq!(
+            pick_process_name("code", b"/usr/share/code/Code\0--shared-files\0").as_deref(),
+            Some("code")
+        );
+        assert_eq!(
+            pick_process_name("claude-desktop", b"Claude\0--disable-logging\0").as_deref(),
+            Some("claude-desktop")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_cmdline_when_comm_is_unreadable() {
+        assert_eq!(
+            pick_process_name("", b"/usr/bin/gnome-shell\0").as_deref(),
+            Some("gnome-shell")
+        );
+        // Kernel threads have an empty cmdline instead.
+        assert_eq!(
+            pick_process_name("kworker/0:1", b"").as_deref(),
+            Some("kworker/0:1")
+        );
+        assert_eq!(pick_process_name("", b""), None);
+    }
+
+    #[test]
+    fn only_argv0_is_used_from_a_long_cmdline() {
+        let cmdline = b"/opt/google/chrome/chrome\0--type=gpu-process\0--ozone-platform=x11\0";
+        assert_eq!(basename_of_argv0(cmdline).as_deref(), Some("chrome"));
+        assert_eq!(basename_of_argv0(b"\0\0\0"), None);
     }
 
     #[test]
