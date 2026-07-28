@@ -57,6 +57,7 @@ impl RgmApp {
                 let gpu_info = monitor.get_static_info();
                 thread::spawn(move || {
                     let mut monitor = monitor;
+                    let mut next_tick = Instant::now();
                     loop {
                         match monitor.sample() {
                             Ok((gpu_data, proc_infos)) => {
@@ -68,7 +69,17 @@ impl RgmApp {
                                 eprintln!("Error sampling GPU data: {}", e);
                             }
                         }
-                        thread::sleep(SAMPLE_INTERVAL);
+                        // Sleep until an absolute deadline rather than for a
+                        // fixed duration: sampling itself takes time, so
+                        // sleeping afterwards adds that cost to every period.
+                        next_tick += SAMPLE_INTERVAL;
+                        match next_tick.checked_duration_since(Instant::now()) {
+                            Some(remaining) => thread::sleep(remaining),
+                            // Behind schedule — a slow tick, or the machine
+                            // resumed from suspend. Resync to now instead of
+                            // firing a burst of samples to catch up.
+                            None => next_tick = Instant::now(),
+                        }
                     }
                 });
                 (gpu_info, None)
