@@ -77,6 +77,30 @@ For development from a source checkout, use `cargo run --release` instead.
 
 The application will auto-detect your GPU vendor and display real-time metrics.
 
+Two flags answer without opening a window, which is what you want from a script:
+
+```bash
+rgm --version
+rgm --help
+```
+
+### Updating
+
+Releases are not delivered by a package repository yet, so an update is a
+download plus an install. This checks the signature of what it downloaded and
+tells you which version you are on first:
+
+```bash
+rgm --version
+cd /tmp && gh release download --repo Neomelt/RGM \
+    --pattern '*_amd64.deb' --pattern 'SHA256SUMS' --clobber \
+  && sha256sum -c --ignore-missing SHA256SUMS \
+  && sudo dpkg -i rgm-ui_*_amd64.deb
+```
+
+Swap the pattern for `*.rpm` on Fedora/RHEL/openSUSE and `dpkg -i` for
+`rpm -U`. With Rust installed, `cargo install rgm_ui` upgrades in place.
+
 ---
 
 ## Troubleshooting

@@ -8,6 +8,20 @@ While the major version is 0, a minor bump may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rgm --version` opened a window instead of printing a version.** Every
+  argument was swallowed, so there was no way to ask an installed RGM which
+  version it was — the first thing any update or bug report needs — and a typo
+  like `rgm --verison` silently launched the GUI. `--version`/`-V` and
+  `--help`/`-h` now print and exit; anything else is reported as a usage error
+  with exit status 2 rather than ignored.
+
+### Added
+
+- An **Updating** section in the README, with a command that verifies the
+  published checksum before installing.
+
 ## [0.5.0] - 2026-07-28
 
 Answers "is my card throttling, and does it matter?" on NVIDIA.
