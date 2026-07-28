@@ -55,18 +55,21 @@ impl RgmApp {
         let (gpu_info, init_error) = match create_monitor() {
             Ok(monitor) => {
                 let gpu_info = monitor.get_static_info();
-                thread::spawn(move || loop {
-                    match monitor.sample() {
-                        Ok((gpu_data, proc_infos)) => {
-                            if sender.send((gpu_data, proc_infos)).is_err() {
-                                break;
+                thread::spawn(move || {
+                    let mut monitor = monitor;
+                    loop {
+                        match monitor.sample() {
+                            Ok((gpu_data, proc_infos)) => {
+                                if sender.send((gpu_data, proc_infos)).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error sampling GPU data: {}", e);
                             }
                         }
-                        Err(e) => {
-                            eprintln!("Error sampling GPU data: {}", e);
-                        }
+                        thread::sleep(SAMPLE_INTERVAL);
                     }
-                    thread::sleep(SAMPLE_INTERVAL);
                 });
                 (gpu_info, None)
             }

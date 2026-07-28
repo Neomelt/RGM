@@ -15,10 +15,20 @@ pub enum MonitorError {
     SamplingFailed(String),
 }
 
-pub trait GpuMonitor: Send + Sync {
+/// `sample` takes `&mut self` so a backend can cache readings across ticks;
+/// the monitor is moved into the sampling thread and owned exclusively by it,
+/// so `Send` alone is enough — `Sync` was never needed.
+pub trait GpuMonitor: Send {
     fn get_static_info(&self) -> GpuInfo;
-    fn sample(&self) -> Result<(GpuData, Vec<ProcessInfo>), MonitorError>;
+    fn sample(&mut self) -> Result<(GpuData, Vec<ProcessInfo>), MonitorError>;
 }
+
+/// `nvmlDeviceGetPcieThroughput` averages over a fixed 20 ms internal window,
+/// so each of the two calls blocks for ~21 ms. Measured on an RTX 5060 Ti
+/// (driver 580.159.03) they cost 42.7 ms of a 43.3 ms sample — 99% of the
+/// budget — and the window size is not configurable. Refresh them on their own
+/// slower cadence and reuse the previous reading in between.
+const PCIE_REFRESH_EVERY: u32 = 10;
 
 // ── NVIDIA Backend ──────────────────────────────────────────────────────────
 
@@ -26,6 +36,10 @@ pub struct NvmlMonitor {
     nvml: Nvml,
     device_index: u32,
     start_time: std::time::Instant,
+    /// Last PCIe throughput reading in MB/s, refreshed every
+    /// `PCIE_REFRESH_EVERY` samples and reused in between.
+    pcie_throughput: (f64, f64),
+    ticks_since_pcie: u32,
 }
 
 impl NvmlMonitor {
@@ -37,6 +51,8 @@ impl NvmlMonitor {
             nvml,
             device_index,
             start_time: std::time::Instant::now(),
+            pcie_throughput: (0.0, 0.0),
+            ticks_since_pcie: 0,
         })
     }
 }
@@ -69,7 +85,7 @@ impl GpuMonitor for NvmlMonitor {
         }
     }
 
-    fn sample(&self) -> Result<(GpuData, Vec<ProcessInfo>), MonitorError> {
+    fn sample(&mut self) -> Result<(GpuData, Vec<ProcessInfo>), MonitorError> {
         // Temporarily get the device object when needed
         let device = self.nvml.device_by_index(self.device_index)?;
 
@@ -95,14 +111,20 @@ impl GpuMonitor for NvmlMonitor {
 
         let fan_speed = device.fan_speed(0).unwrap_or(0);
 
-        let pcie_tx = device
-            .pcie_throughput(PcieUtilCounter::Send)
-            .map(|v| v as f64 / 1024.0)
-            .unwrap_or(0.0);
-        let pcie_rx = device
-            .pcie_throughput(PcieUtilCounter::Receive)
-            .map(|v| v as f64 / 1024.0)
-            .unwrap_or(0.0);
+        if self.ticks_since_pcie == 0 {
+            self.pcie_throughput = (
+                device
+                    .pcie_throughput(PcieUtilCounter::Send)
+                    .map(|v| v as f64 / 1024.0)
+                    .unwrap_or(0.0),
+                device
+                    .pcie_throughput(PcieUtilCounter::Receive)
+                    .map(|v| v as f64 / 1024.0)
+                    .unwrap_or(0.0),
+            );
+        }
+        self.ticks_since_pcie = (self.ticks_since_pcie + 1) % PCIE_REFRESH_EVERY;
+        let (pcie_tx, pcie_rx) = self.pcie_throughput;
 
         let gpu_data = GpuData {
             timestamp: self.start_time.elapsed().as_secs_f64(),
@@ -306,7 +328,7 @@ impl GpuMonitor for AmdgpuMonitor {
         }
     }
 
-    fn sample(&self) -> Result<(GpuData, Vec<ProcessInfo>), MonitorError> {
+    fn sample(&mut self) -> Result<(GpuData, Vec<ProcessInfo>), MonitorError> {
         let utilization = self.gpu_handle.get_busy_percent().unwrap_or(0) as f32;
 
         // VRAM – may be unavailable on iGPUs
