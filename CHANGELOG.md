@@ -50,12 +50,15 @@ labelled properly now, and the internals are prepared for what comes next.
 
 ### Upgrade notes
 
-- Saved window geometry resets once. eframe derives its state directory from
-  the `app_id`, so it moves from `~/.local/share/RGM` to `~/.local/share/rgm`.
 - On X11 the `WM_CLASS` instance is now empty (`"", "rgm"` instead of
   `"rgm", "rgm"`) — an egui-winit limitation, since it hardcodes an empty
   instance and the field is shared by both Linux backends. Rules matching on
-  the class, which is the usual form, are unaffected.
+  the class (`i3`'s `class=`, `StartupWMClass`) are unaffected; a rule
+  matching on the instance is not, and there is no way to set the two
+  independently through eframe.
+- Saved window geometry is preserved. eframe lowercases the app id when it
+  builds its state directory on Linux, so the old app name `RGM` and the new
+  `app_id` `rgm` both resolve to `~/.local/share/rgm`.
 
 ## [0.3.0] - 2026-07-25
 

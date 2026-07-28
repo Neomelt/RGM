@@ -12,7 +12,13 @@ fn main() {
             // Without this, egui-winit never calls set_app_id on Wayland, so
             // the window has no app_id for compositors to match against
             // rgm.desktop or a tiling rule. Must equal the desktop file's
-            // basename. X11 already derives WM_CLASS from the binary name.
+            // basename.
+            //
+            // It is not free on X11: egui-winit passes the id through as
+            // winit's shared `name` field with an empty instance, so WM_CLASS
+            // goes from ("rgm", "rgm") to ("", "rgm"). Rules matching the
+            // class still work, ones matching the instance do not, and eframe
+            // exposes no way to set them separately.
             .with_app_id("rgm"),
         ..Default::default()
     };
