@@ -8,3 +8,4 @@ Terminal=false
 Categories=System;Utility;Monitor;
 Keywords=GPU;monitor;NVIDIA;AMD;egui;
 StartupNotify=true
+StartupWMClass=rgm
