@@ -11,8 +11,6 @@ use std::path::PathBuf;
 pub enum MonitorError {
     #[error("NVML initialization failed: {0}")]
     NvmlInit(#[from] nvml_wrapper::error::NvmlError),
-    #[error("Device not found at index {0}")]
-    DeviceNotFound(u32),
     #[error("Failed to get data: {0}")]
     SamplingFailed(String),
 }
@@ -55,9 +53,7 @@ impl GpuMonitor for NvmlMonitor {
         let Ok(device) = self.nvml.device_by_index(self.device_index) else {
             return GpuInfo {
                 name: "N/A".to_string(),
-                uuid: "N/A".to_string(),
                 driver_version,
-                vbios_version: "N/A".to_string(),
                 pcie_gen: 0,
                 pcie_width: 0,
                 device_count,
@@ -66,9 +62,7 @@ impl GpuMonitor for NvmlMonitor {
 
         GpuInfo {
             name: device.name().unwrap_or_else(|_| "N/A".to_string()),
-            uuid: device.uuid().unwrap_or_else(|_| "N/A".to_string()),
             driver_version,
-            vbios_version: device.vbios_version().unwrap_or_else(|_| "N/A".to_string()),
             pcie_gen: device.current_pcie_link_gen().unwrap_or(0),
             pcie_width: device.current_pcie_link_width().unwrap_or(0),
             device_count,
@@ -155,7 +149,6 @@ fn to_process_infos(
                 UsedGpuMemory::Used(v) => v,
                 _ => 0,
             },
-            cpu_percent: 0.0,
         })
         .collect()
 }
@@ -288,11 +281,6 @@ impl GpuMonitor for AmdgpuMonitor {
 
         let driver_version = self.gpu_handle.get_driver().to_string();
 
-        let vbios_version = self
-            .gpu_handle
-            .get_vbios_version()
-            .unwrap_or_else(|_| "N/A".to_string());
-
         // PCIe link width is reported as a string like "16" – parse to u32
         let pcie_width = self
             .gpu_handle
@@ -311,9 +299,7 @@ impl GpuMonitor for AmdgpuMonitor {
 
         GpuInfo {
             name,
-            uuid: "N/A".to_string(),
             driver_version,
-            vbios_version,
             pcie_gen,
             pcie_width,
             device_count: self.device_count,
@@ -413,7 +399,6 @@ mod tests {
             pid,
             name: format!("proc{pid}"),
             memory_usage,
-            cpu_percent: 0.0,
         }
     }
 

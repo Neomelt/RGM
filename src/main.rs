@@ -1,6 +1,9 @@
-use eframe::egui::ViewportBuilder;
+mod app;
+mod data;
+mod monitor;
 
-use rgm_ui::app::RgmApp;
+use app::RgmApp;
+use eframe::egui::ViewportBuilder;
 
 fn main() {
     let native_options = eframe::NativeOptions {

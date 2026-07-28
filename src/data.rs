@@ -19,11 +19,9 @@ pub struct GpuData {
 #[derive(Clone, Debug, Default)]
 pub struct GpuInfo {
     pub name: String,
-    pub uuid: String,
     pub pcie_gen: u32,
     pub pcie_width: u32,
     pub driver_version: String,
-    pub vbios_version: String,
     /// Number of GPUs the backend can see; only device 0 is monitored today,
     /// so the UI labels the device "GPU 0 of N" when N > 1.
     pub device_count: u32,
@@ -35,6 +33,4 @@ pub struct ProcessInfo {
     pub pid: u32,
     pub name: String,
     pub memory_usage: u64,
-    #[allow(dead_code)]
-    pub cpu_percent: f32,
 }
