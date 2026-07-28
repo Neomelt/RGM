@@ -25,6 +25,10 @@ pub struct GpuInfo {
     /// Number of GPUs the backend can see; only device 0 is monitored today,
     /// so the UI labels the device "GPU 0 of N" when N > 1.
     pub device_count: u32,
+    /// Whether this backend can enumerate per-process GPU memory at all. It
+    /// separates "nothing is using the GPU" from "we cannot tell", which an
+    /// empty process table alone would conflate.
+    pub per_process_supported: bool,
 }
 
 // Process information structure, storing information about GPU processes

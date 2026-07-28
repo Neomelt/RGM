@@ -73,6 +73,7 @@ impl GpuMonitor for NvmlMonitor {
                 pcie_gen: 0,
                 pcie_width: 0,
                 device_count,
+                per_process_supported: true,
             };
         };
 
@@ -82,6 +83,7 @@ impl GpuMonitor for NvmlMonitor {
             pcie_gen: device.current_pcie_link_gen().unwrap_or(0),
             pcie_width: device.current_pcie_link_width().unwrap_or(0),
             device_count,
+            per_process_supported: true,
         }
     }
 
@@ -362,6 +364,9 @@ impl GpuMonitor for AmdgpuMonitor {
             pcie_gen,
             pcie_width,
             device_count: self.device_count,
+            // amdgpu exposes per-process usage through DRM fdinfo, which this
+            // backend does not read yet.
+            per_process_supported: false,
         }
     }
 

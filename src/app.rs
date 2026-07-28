@@ -345,6 +345,19 @@ impl RgmApp {
 
     fn process_table(&self, ui: &mut egui::Ui) {
         ui.label(RichText::new("Processes").color(TEXT_SECONDARY).size(12.0));
+
+        // An empty table would read as "nothing is using the GPU", which is a
+        // different claim from "this backend cannot tell".
+        if self.processes.is_empty() {
+            let msg = if self.gpu_info.per_process_supported {
+                "No processes are using the GPU."
+            } else {
+                "Per-process data is not available on this backend yet."
+            };
+            ui.label(RichText::new(msg).color(TEXT_SECONDARY).size(12.0));
+            return;
+        }
+
         let mut procs: Vec<&ProcessInfo> = self.processes.iter().collect();
         procs.sort_by_key(|p| std::cmp::Reverse(p.memory_usage));
 
