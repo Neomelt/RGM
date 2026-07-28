@@ -8,6 +8,41 @@ While the major version is 0, a minor bump may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-28
+
+Answers "is my card throttling, and does it matter?" on NVIDIA.
+
+### Added
+
+- **Why clocks are held back, right now.** A line under the metrics reads the
+  driver's clock-event reasons out loud, ranked by what you can act on:
+  hardware slowdown and thermal limits are flagged, while sitting at the power
+  limit is stated plainly — that is what a healthy card does under sustained
+  load, not a fault. Reasons that describe no limit you are running into
+  (idle clocks, application clock settings, sync boost, display clocks) are
+  deliberately not reported.
+- **How much it has cost you.** The same line carries the share of this
+  session's *load* time that the power limit held clocks down, taken from the
+  driver's own cumulative counter rather than integrated from samples, so
+  throttling between samples is not missed. A session that never reached the
+  limit says so, rather than reporting "0%" of something that did not happen.
+
+The denominator is load time, not wall-clock time, and this is the part worth
+knowing about: the driver's counter also advances while the GPU idles, and
+while sampling is stalled by a driver error. Windows that were not observed
+under load are discarded rather than counted, so the figure describes time you
+were actually waiting on the GPU. It is withheld entirely until enough load
+time has accumulated to mean anything.
+
+### Notes
+
+- NVIDIA only. AMD's throttler status lives in the versioned binary
+  `gpu_metrics` blob, which this backend does not parse; both fields report
+  "unavailable" rather than zero.
+- Only the power policy is reported. The driver's thermal counter reads zero
+  on consumer hardware and NVML documents it as unsupported, so no thermal
+  share is claimed.
+
 ## [0.4.0] - 2026-07-28
 
 Correctness release. No new metrics — the existing ones are measured and
@@ -105,7 +140,8 @@ labelled properly now, and the internals are prepared for what comes next.
 - First public release: real-time NVIDIA monitoring via NVML, AMD support via
   amdgpu sysfs, and the CI/CD release workflow.
 
-[Unreleased]: https://github.com/Neomelt/RGM/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Neomelt/RGM/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Neomelt/RGM/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Neomelt/RGM/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Neomelt/RGM/compare/v0.2.5...v0.3.0
 [0.2.5]: https://github.com/Neomelt/RGM/compare/v0.2.0...v0.2.5
