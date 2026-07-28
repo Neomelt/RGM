@@ -1,3 +1,11 @@
 /target
+
+# Release artifacts built into the working tree by .github/workflows/release.yml.
+# They must be ignored, not merely uncommitted: cargo publish refuses to run in
+# a dirty tree, and cargo package would otherwise embed the built binaries in
+# the .crate file.
+/artifacts
+/dist
+
 .cz-config.js
 .claude/
