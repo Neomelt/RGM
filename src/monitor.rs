@@ -1,5 +1,8 @@
-use crate::data::{GpuData, GpuInfo, ProcessInfo};
-use nvml_wrapper::enum_wrappers::device::{Clock, PcieUtilCounter, TemperatureSensor};
+use crate::data::{GpuData, GpuInfo, ProcessInfo, ThrottleReasons};
+use nvml_wrapper::bitmasks::device::ThrottleReasons as NvmlThrottleReasons;
+use nvml_wrapper::enum_wrappers::device::{
+    Clock, PcieUtilCounter, PerformancePolicy, TemperatureSensor,
+};
 use nvml_wrapper::enums::device::UsedGpuMemory;
 use nvml_wrapper::Nvml;
 use thiserror::Error;
@@ -30,6 +33,95 @@ pub trait GpuMonitor: Send {
 /// slower cadence and reuse the previous reading in between.
 const PCIE_REFRESH_EVERY: u32 = 10;
 
+/// `nvmlDeviceGetViolationStatus` costs ~0.56 ms/call against 0.000 ms for the
+/// throttle bitmask, so the counter reads on its own slower cadence.
+const VIOLATION_REFRESH_EVERY: u32 = 10;
+
+/// A sample at or above this utilization counts the GPU as doing work. The
+/// power-cap counter advances while idle too — measured +32 ms over a 10 s
+/// window at 5% utilization in P5 — so a wall-clock denominator would report
+/// throttling on a machine sitting at the desktop.
+const BUSY_UTILIZATION_PERCENT: f32 = 10.0;
+
+/// Below this much accumulated busy time the share is noise, not a measurement.
+const MIN_BUSY_NANOS: u64 = 5_000_000_000;
+
+/// A gap between successful samples longer than this means the loop stalled —
+/// NVML erroring for a while, or the process frozen. The driver's counter runs
+/// through such a gap while the utilization samples do not, so the window
+/// spanning it cannot be attributed and is thrown away instead of counted.
+const SAMPLE_GAP_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Accumulates how much of the GPU's *busy* time the power limit held clocks
+/// down, from the driver's own cumulative counter.
+///
+/// The counter cannot be split across a window, so a window counts in full or
+/// not at all, decided by whether most of its samples saw the GPU working.
+/// That costs precision at the boundary between idle and load and buys a
+/// number that does not accuse an idle desktop of throttling.
+#[derive(Default)]
+struct PowerCapAccounting {
+    busy_samples: u32,
+    window_samples: u32,
+    last_counter_nanos: Option<u64>,
+    busy_nanos: u64,
+    capped_nanos: u64,
+}
+
+impl PowerCapAccounting {
+    fn observe_sample(&mut self, utilization: f32) {
+        self.window_samples += 1;
+        if utilization >= BUSY_UTILIZATION_PERCENT {
+            self.busy_samples += 1;
+        }
+    }
+
+    /// Close the current window against a fresh reading of the driver counter.
+    fn close_window(&mut self, counter_nanos: u64, window_nanos: u64) {
+        let previous = self.last_counter_nanos.replace(counter_nanos);
+        let mostly_busy = self.busy_samples * 2 > self.window_samples;
+        self.window_samples = 0;
+        self.busy_samples = 0;
+
+        // The first reading only establishes a baseline; the counter is
+        // cumulative since driver load, not since this process started.
+        let Some(previous) = previous else {
+            return;
+        };
+        if mostly_busy {
+            self.busy_nanos += window_nanos;
+            self.capped_nanos += counter_nanos.saturating_sub(previous);
+        }
+    }
+
+    /// Abandon the window in progress and re-baseline on the next reading.
+    /// What has already been accumulated stays: it was measured correctly.
+    fn discard_window(&mut self) {
+        self.window_samples = 0;
+        self.busy_samples = 0;
+        self.last_counter_nanos = None;
+    }
+
+    fn capped_share(&self) -> Option<f32> {
+        (self.busy_nanos >= MIN_BUSY_NANOS)
+            .then(|| (self.capped_nanos as f64 / self.busy_nanos as f64).clamp(0.0, 1.0) as f32)
+    }
+}
+
+/// NVML asserts several bits that do not describe a limit the user is running
+/// into; see [`ThrottleReasons`] for why they are dropped.
+fn map_throttle_reasons(raw: NvmlThrottleReasons) -> ThrottleReasons {
+    ThrottleReasons {
+        power_cap: raw.contains(NvmlThrottleReasons::SW_POWER_CAP),
+        thermal: raw.intersects(
+            NvmlThrottleReasons::SW_THERMAL_SLOWDOWN | NvmlThrottleReasons::HW_THERMAL_SLOWDOWN,
+        ),
+        hardware: raw.intersects(
+            NvmlThrottleReasons::HW_SLOWDOWN | NvmlThrottleReasons::HW_POWER_BRAKE_SLOWDOWN,
+        ),
+    }
+}
+
 // ── NVIDIA Backend ──────────────────────────────────────────────────────────
 
 pub struct NvmlMonitor {
@@ -40,6 +132,10 @@ pub struct NvmlMonitor {
     /// `PCIE_REFRESH_EVERY` samples and reused in between.
     pcie_throughput: (f64, f64),
     ticks_since_pcie: u32,
+    power_cap: PowerCapAccounting,
+    ticks_since_violation: u32,
+    last_violation_read: std::time::Instant,
+    last_sample_at: std::time::Instant,
 }
 
 impl NvmlMonitor {
@@ -53,6 +149,10 @@ impl NvmlMonitor {
             start_time: std::time::Instant::now(),
             pcie_throughput: (0.0, 0.0),
             ticks_since_pcie: 0,
+            power_cap: PowerCapAccounting::default(),
+            ticks_since_violation: 0,
+            last_violation_read: std::time::Instant::now(),
+            last_sample_at: std::time::Instant::now(),
         })
     }
 }
@@ -128,6 +228,34 @@ impl GpuMonitor for NvmlMonitor {
         self.ticks_since_pcie = (self.ticks_since_pcie + 1) % PCIE_REFRESH_EVERY;
         let (pcie_tx, pcie_rx) = self.pcie_throughput;
 
+        // The bitmask is free to read; the cumulative counter is not.
+        let throttle = device
+            .current_throttle_reasons()
+            .ok()
+            .map(map_throttle_reasons);
+
+        // Sampling can stall — NVML erroring after a GPU reset, or the whole
+        // process suspended. The counter keeps running through it, so a window
+        // spanning the gap would charge unobserved time against observed load.
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_sample_at) > SAMPLE_GAP_LIMIT {
+            self.power_cap.discard_window();
+            self.last_violation_read = now;
+        }
+        self.last_sample_at = now;
+
+        self.power_cap.observe_sample(util.gpu as f32);
+        self.ticks_since_violation = (self.ticks_since_violation + 1) % VIOLATION_REFRESH_EVERY;
+        if self.ticks_since_violation == 0 {
+            if let Ok(violation) = device.violation_status(PerformancePolicy::Power) {
+                let now = std::time::Instant::now();
+                let window = now.duration_since(self.last_violation_read);
+                self.last_violation_read = now;
+                self.power_cap
+                    .close_window(violation.violation_time, window.as_nanos() as u64);
+            }
+        }
+
         let gpu_data = GpuData {
             timestamp: self.start_time.elapsed().as_secs_f64(),
             utilization: util.gpu as f32,
@@ -141,6 +269,8 @@ impl GpuMonitor for NvmlMonitor {
             fan_speed,
             pcie_throughput_tx: pcie_tx,
             pcie_throughput_rx: pcie_rx,
+            throttle,
+            power_capped_share: self.power_cap.capped_share(),
         };
 
         // NVML reports graphics (OpenGL/Vulkan/X) and compute (CUDA) workloads
@@ -419,6 +549,10 @@ impl GpuMonitor for AmdgpuMonitor {
             // amdgpu sysfs does not expose PCIe throughput counters
             pcie_throughput_tx: 0.0,
             pcie_throughput_rx: 0.0,
+            // amdgpu reports throttler status through the versioned binary
+            // gpu_metrics blob, which this backend does not parse.
+            throttle: None,
+            power_capped_share: None,
         };
 
         // amdgpu_sysfs does not provide per-process GPU usage
@@ -553,6 +687,135 @@ mod tests {
         let cmdline = b"/opt/google/chrome/chrome\0--type=gpu-process\0--ozone-platform=x11\0";
         assert_eq!(basename_of_argv0(cmdline).as_deref(), Some("chrome"));
         assert_eq!(basename_of_argv0(b"\0\0\0"), None);
+    }
+
+    const SECOND: u64 = 1_000_000_000;
+
+    /// Feed `windows` one-second windows at the given utilization, each adding
+    /// `capped_per_window` nanoseconds to the driver's cumulative counter.
+    fn run_windows(
+        acc: &mut PowerCapAccounting,
+        windows: u32,
+        utilization: f32,
+        capped_per_window: u64,
+    ) {
+        let mut counter = acc.last_counter_nanos.unwrap_or(0);
+        for _ in 0..windows {
+            for _ in 0..10 {
+                acc.observe_sample(utilization);
+            }
+            counter += capped_per_window;
+            acc.close_window(counter, SECOND);
+        }
+    }
+
+    #[test]
+    fn first_window_only_establishes_a_baseline() {
+        let mut acc = PowerCapAccounting::default();
+        // The counter is cumulative since driver load, so its first absolute
+        // value must not be charged to this session.
+        acc.observe_sample(90.0);
+        acc.close_window(900 * SECOND, SECOND);
+        assert_eq!(acc.busy_nanos, 0);
+        assert_eq!(acc.capped_nanos, 0);
+    }
+
+    #[test]
+    fn idle_windows_are_not_counted() {
+        let mut acc = PowerCapAccounting::default();
+        // 5% utilization with the counter still advancing is the measured
+        // idle-desktop case; charging it would report throttling at rest.
+        run_windows(&mut acc, 30, 5.0, SECOND / 100);
+        assert_eq!(acc.busy_nanos, 0);
+        assert_eq!(acc.capped_share(), None);
+    }
+
+    #[test]
+    fn busy_windows_yield_a_share_of_busy_time() {
+        let mut acc = PowerCapAccounting::default();
+        run_windows(&mut acc, 1, 95.0, 0); // baseline
+        run_windows(&mut acc, 20, 95.0, SECOND / 10);
+        assert_eq!(acc.busy_nanos, 20 * SECOND);
+        let share = acc.capped_share().expect("enough busy time");
+        assert!((share - 0.1).abs() < 1e-6, "got {share}");
+    }
+
+    #[test]
+    fn share_is_withheld_until_busy_time_is_meaningful() {
+        let mut acc = PowerCapAccounting::default();
+        run_windows(&mut acc, 1, 95.0, 0); // baseline
+        run_windows(&mut acc, 4, 95.0, SECOND / 10);
+        assert_eq!(acc.capped_share(), None, "4 s of load is not a measurement");
+        run_windows(&mut acc, 1, 95.0, SECOND / 10);
+        assert!(acc.capped_share().is_some(), "5 s crosses the threshold");
+    }
+
+    #[test]
+    fn share_stays_within_bounds_if_the_counter_outruns_the_window() {
+        let mut acc = PowerCapAccounting::default();
+        run_windows(&mut acc, 1, 95.0, 0); // baseline
+                                           // A window that idled is skipped, but its counter growth still shows
+                                           // up in the next busy window's delta, which can exceed the window.
+        run_windows(&mut acc, 10, 95.0, 3 * SECOND);
+        assert_eq!(acc.capped_share(), Some(1.0));
+    }
+
+    #[test]
+    fn a_stalled_window_is_thrown_away_rather_than_counted() {
+        let mut acc = PowerCapAccounting::default();
+        run_windows(&mut acc, 1, 95.0, 0); // baseline
+        run_windows(&mut acc, 10, 95.0, SECOND / 10);
+        let (busy, capped) = (acc.busy_nanos, acc.capped_nanos);
+
+        // Sampling stalls for a minute; the driver counter runs the whole
+        // time. Charging that window would dilute the share with unobserved
+        // time, so the window is dropped and the next reading re-baselines.
+        for _ in 0..10 {
+            acc.observe_sample(95.0);
+        }
+        acc.discard_window();
+        acc.close_window(999 * SECOND, 61 * SECOND);
+        assert_eq!((acc.busy_nanos, acc.capped_nanos), (busy, capped));
+
+        // Measurement resumes cleanly afterwards.
+        run_windows(&mut acc, 5, 95.0, SECOND / 10);
+        assert_eq!(acc.busy_nanos, busy + 5 * SECOND);
+    }
+
+    #[test]
+    fn a_counter_reset_does_not_underflow() {
+        let mut acc = PowerCapAccounting::default();
+        run_windows(&mut acc, 1, 95.0, 0);
+        for _ in 0..10 {
+            acc.observe_sample(95.0);
+        }
+        // A driver reload restarts the counter below the previous reading.
+        acc.close_window(0, SECOND);
+        assert_eq!(acc.capped_nanos, 0);
+    }
+
+    #[test]
+    fn nvml_bits_map_to_reasons_worth_showing() {
+        let idle = map_throttle_reasons(NvmlThrottleReasons::GPU_IDLE);
+        assert_eq!(idle, ThrottleReasons::default(), "idle is not throttling");
+
+        let capped = map_throttle_reasons(NvmlThrottleReasons::SW_POWER_CAP);
+        assert!(capped.power_cap && !capped.thermal && !capped.hardware);
+
+        let hot = map_throttle_reasons(
+            NvmlThrottleReasons::HW_THERMAL_SLOWDOWN | NvmlThrottleReasons::HW_SLOWDOWN,
+        );
+        assert!(hot.thermal && hot.hardware && !hot.power_cap);
+
+        // The software thermal bit is the one a consumer card asserts when it
+        // settles at its temperature target, which is the everyday case; the
+        // hardware bit is the emergency one. Dropping it would report a card
+        // that is visibly held back by heat as "unthrottled".
+        let warm = map_throttle_reasons(NvmlThrottleReasons::SW_THERMAL_SLOWDOWN);
+        assert!(warm.thermal && !warm.hardware && !warm.power_cap);
+
+        let brake = map_throttle_reasons(NvmlThrottleReasons::HW_POWER_BRAKE_SLOWDOWN);
+        assert!(brake.hardware && !brake.power_cap);
     }
 
     #[test]

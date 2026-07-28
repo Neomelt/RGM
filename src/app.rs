@@ -1,4 +1,4 @@
-use crate::data::{GpuData, GpuInfo, ProcessInfo};
+use crate::data::{GpuData, GpuInfo, ProcessInfo, ThrottleReasons};
 use crate::monitor::create_monitor;
 use crossbeam_channel::{bounded, Receiver};
 use eframe::egui::{self, Color32, RichText, Sense};
@@ -27,6 +27,7 @@ const CARD_FILL: Color32 = Color32::from_rgb(0x24, 0x24, 0x22);
 const PLOT_BG: Color32 = Color32::from_rgb(0x14, 0x14, 0x13);
 const TEXT_SECONDARY: Color32 = Color32::from_rgb(0xC3, 0xC2, 0xB7);
 const WARN: Color32 = Color32::from_rgb(0xFF, 0xB4, 0x00);
+const CRIT: Color32 = Color32::from_rgb(0xE5, 0x48, 0x48);
 
 // Main application structure
 pub struct RgmApp {
@@ -215,6 +216,11 @@ impl RgmApp {
             .color(TEXT_SECONDARY)
             .size(11.0),
         );
+
+        if let Some(throttle) = latest.throttle {
+            let (text, color) = throttle_label(throttle, latest.power_capped_share);
+            ui.label(RichText::new(text).color(color).size(11.0));
+        }
     }
 
     fn sparklines(&self, ui: &mut egui::Ui, latest: &GpuData) {
@@ -439,6 +445,48 @@ fn stat_card(
         });
 }
 
+/// Reading the throttle state out loud, ranked by what the user can act on.
+///
+/// Sitting at the power limit is what a healthy card does under sustained
+/// load, so it is stated plainly rather than coloured as a fault; the session
+/// share is what turns it into a decision ("is it worth raising the cap?").
+/// Thermal and hardware slowdown are the ones worth reacting to. Painting
+/// every asserted bit as trouble is how a monitor teaches people to ignore it.
+fn throttle_label(throttle: ThrottleReasons, capped_share: Option<f32>) -> (String, Color32) {
+    if throttle.hardware {
+        return (
+            "Clocks: hardware slowdown — thermal limit or power brake".to_owned(),
+            CRIT,
+        );
+    }
+    if throttle.thermal {
+        return ("Clocks: held back by temperature".to_owned(), WARN);
+    }
+
+    let share_text = match capped_share {
+        Some(share) => format!(" · {:.1}% of load time so far", share * 100.0),
+        // Withheld until enough busy time has accumulated to mean anything.
+        None => String::new(),
+    };
+    if throttle.power_cap {
+        return (format!("Clocks: at the power limit{share_text}"), WARN);
+    }
+    match capped_share {
+        // Branch on the value, not on the rendered text: a share small enough
+        // to print as 0.0% still means the limit was reached at some point,
+        // and saying so is the difference between a measurement and a guess.
+        Some(share) if share <= 0.0 => (
+            "Clocks: unthrottled · never at the power limit this session".to_owned(),
+            TEXT_SECONDARY,
+        ),
+        Some(_) => (
+            format!("Clocks: unthrottled · power limit reached{share_text}"),
+            TEXT_SECONDARY,
+        ),
+        None => ("Clocks: unthrottled".to_owned(), TEXT_SECONDARY),
+    }
+}
+
 fn identity_dot(ui: &mut egui::Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 4.0, color);
@@ -499,5 +547,70 @@ impl eframe::App for RgmApp {
         // only re-renders identical frames. Input-driven repaints still fire
         // immediately, egui handles those on its own.
         ctx.request_repaint_after(SAMPLE_INTERVAL);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quiet() -> ThrottleReasons {
+        ThrottleReasons::default()
+    }
+
+    #[test]
+    fn a_measured_zero_share_does_not_claim_the_limit_was_reached() {
+        // The common case: a card under load that never approaches its power
+        // limit. Some(0.0) is a measurement, so it must not read the same as
+        // Some(0.37), and it must not contradict "unthrottled".
+        let (text, _) = throttle_label(quiet(), Some(0.0));
+        assert!(!text.contains("power limit reached"), "got {text:?}");
+        assert!(text.contains("never at the power limit"), "got {text:?}");
+    }
+
+    #[test]
+    fn a_share_too_small_to_print_still_counts_as_reached() {
+        // Renders as "0.0%", but the limit really was hit, so the wording has
+        // to come from the value rather than from the formatted string.
+        let (text, _) = throttle_label(quiet(), Some(0.0004));
+        assert!(text.contains("power limit reached"), "got {text:?}");
+    }
+
+    #[test]
+    fn no_measurement_yet_says_nothing_about_the_limit() {
+        let (text, _) = throttle_label(quiet(), None);
+        assert_eq!(text, "Clocks: unthrottled");
+    }
+
+    #[test]
+    fn active_limits_outrank_the_session_figure() {
+        let (text, color) = throttle_label(
+            ThrottleReasons {
+                power_cap: true,
+                ..Default::default()
+            },
+            Some(0.37),
+        );
+        assert!(
+            text.starts_with("Clocks: at the power limit"),
+            "got {text:?}"
+        );
+        assert!(text.contains("37.0%"), "got {text:?}");
+        assert_eq!(color, WARN);
+
+        let hot = ThrottleReasons {
+            thermal: true,
+            ..Default::default()
+        };
+        assert_eq!(throttle_label(hot, Some(0.9)).1, WARN);
+
+        let severe = ThrottleReasons {
+            hardware: true,
+            thermal: true,
+            power_cap: true,
+        };
+        let (text, color) = throttle_label(severe, Some(0.9));
+        assert!(text.contains("hardware slowdown"), "got {text:?}");
+        assert_eq!(color, CRIT);
     }
 }
