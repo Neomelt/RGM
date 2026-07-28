@@ -8,6 +8,8 @@ While the major version is 0, a minor bump may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-28
+
 ### Fixed
 
 - **`rgm --version` opened a window instead of printing a version.** Every
@@ -154,7 +156,8 @@ labelled properly now, and the internals are prepared for what comes next.
 - First public release: real-time NVIDIA monitoring via NVML, AMD support via
   amdgpu sysfs, and the CI/CD release workflow.
 
-[Unreleased]: https://github.com/Neomelt/RGM/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Neomelt/RGM/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Neomelt/RGM/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Neomelt/RGM/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Neomelt/RGM/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Neomelt/RGM/compare/v0.2.5...v0.3.0
